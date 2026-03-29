@@ -1,0 +1,40 @@
+{
+  "name": "ai-storyteller-engine",
+  "version": "0.1.0",
+  "description": "AI说书人委员会 — 多代理游戏引擎",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts",
+    "start": "node dist/index.js",
+    "demo": "tsx src/demo.ts",
+    "demo:adventure": "tsx src/demo.ts --mode adventure",
+    "demo:battle": "tsx src/demo.ts --mode battle",
+    "demo:sandbox": "tsx src/demo.ts --mode sandbox",
+    "demo:roleplay": "tsx src/demo.ts --mode roleplay",
+    "test:local": "tsx src/test-local.ts",
+    "server": "tsx src/server.ts",
+    "server:watch": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "eventemitter3": "^5.0.1",
+    "express": "^5.2.1",
+    "ollama": "^0.5.11",
+    "openai": "^4.60.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

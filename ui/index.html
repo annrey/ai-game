@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 说书人委员会 | 沉浸式文字冒险</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Jade Horizon 配色 - 浅绿主调 */
+      --jade-50: #F0FAF2;
+      --jade-100: #E8F5EA;
+      --jade-200: #D4EDD8;
+      --jade-300: #B7E5BA;
+      --jade-400: #8FD69A;
+      --jade-500: #5CAB7C;
+      --jade-600: #288760;
+      --jade-700: #1A5A40;
+      --jade-800: #0F3D2E;
+      --jade-900: #1A5140;
+
+      /* 主色调映射 */
+      --forest-900: #F5FBF6;
+      --forest-800: #E8F5EA;
+      --forest-700: #D4EDD8;
+      --forest-600: #B7E5BA;
+      --forest-500: #8FD69A;
+      --forest-400: #5CAB7C;
+      --forest-300: #288760;
+      --forest-200: #1A5A40;
+      --forest-100: #0F3D2E;
+
+      --mint-300: #288760;
+      --mint-200: #1A5A40;
+      --mint-100: #0F3D2E;
+      --mint-50: #1A5140;
+
+      --accent-glow: rgba(92, 171, 124, 0.25);
+      --shadow-soft: 0 4px 24px rgba(40, 135, 96, 0.1);
+      --shadow-medium: 0 8px 40px rgba(40, 135, 96, 0.15);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Crimson Text', Georgia, serif;
+      background: var(--forest-900);
+      color: var(--mint-100);
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.7;
+    }
+
+    /* 背景纹理 - 浅绿渐变 */
+    .bg-texture {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background: linear-gradient(180deg,
+        var(--jade-300) 0%,
+        var(--jade-200) 30%,
+        var(--jade-100) 60%,
+        var(--jade-50) 100%);
+    }
+
+    .bg-texture::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(ellipse at 20% 20%, rgba(92, 171, 124, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(40, 135, 96, 0.1) 0%, transparent 40%),
+        radial-gradient(ellipse at 50% 50%, rgba(183, 229, 186, 0.3) 0%, transparent 60%);
+    }
+
+    .bg-grain {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    }
+
+    /* 布局 */
+    .app-container {
+      position: relative;
+      z-index: 2;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 280px 1fr 320px;
+      gap: 1px;
+      background: rgba(92, 171, 124, 0.15);
+    }
+
+    /* 侧边栏 */
+    .sidebar {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(20px);
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      border-right: 1px solid rgba(92, 171, 124, 0.2);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid rgba(92, 171, 124, 0.25);
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--jade-500), var(--jade-600));
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .logo-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--jade-800);
+      line-height: 1.4;
+    }
+
+    .logo-text span {
+      display: block;
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--jade-600);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    /* 导航 */
+    .nav-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-label {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--jade-600);
+      padding: 0 12px;
+      margin-bottom: 4px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      color: var(--jade-800);
+      font-size: 15px;
+    }
+
+    .nav-item:hover {
+      background: rgba(183, 229, 186, 0.4);
+      color: var(--jade-900);
+    }
+
+    .nav-item.active {
+      background: rgba(92, 171, 124, 0.25);
+      color: var(--jade-900);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+
+    .nav-icon {
+      width: 20px;
+      height: 20px;
+      opacity: 0.7;
+    }
+
+    /* 委员会成员 */
+    .council-section {
+      margin-top: auto;
+    }
+
+    .council-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .council-member {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(183, 229, 186, 0.3);
+      border: 1px solid transparent;
+      transition: all 0.3s ease;
+    }
+
+    .council-member:hover {
+      border-color: var(--jade-500);
+      background: rgba(183, 229, 186, 0.5);
+    }
+
+    .member-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--jade-500), var(--jade-600));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .member-info {
+      flex: 1;
+    }
+
+    .member-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--jade-900);
+    }
+
+    .member-role {
+      font-family: 'Space Mono', monospace;
+      font-size: 9px;
+      color: var(--jade-600);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .member-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--jade-500);
+      box-shadow: 0 0 8px var(--jade-500);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* 主内容区 */
+    .main-content {
+      background: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .content-header {
+      padding: 24px 32px;
+      border-bottom: 1px solid rgba(92, 171, 124, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .scene-title {
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--jade-900);
+      letter-spacing: -0.5px;
+    }
+
+    .scene-meta {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--jade-600);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .meta-badge {
+      padding: 4px 10px;
+      background: rgba(183, 229, 186, 0.4);
+      border-radius: 20px;
+      border: 1px solid rgba(92, 171, 124, 0.25);
+    }
+
+    /* 故事区域 */
+    .story-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px;
+      scroll-behavior: smooth;
+    }
+
+    .story-container::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .story-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .story-container::-webkit-scrollbar-thumb {
+      background: rgba(92, 171, 124, 0.4);
+      border-radius: 3px;
+    }
+
+    .narrative-block {
+      max-width: 720px;
+      margin: 0 auto 32px;
+      padding: 32px;
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 20px;
+      border: 1px solid rgba(92, 171, 124, 0.25);
+      box-shadow: var(--shadow-soft);
+      position: relative;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .narrative-block::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--jade-500), transparent);
+      opacity: 0.5;
+      border-radius: 20px 20px 0 0;
+    }
+
+    .narrative-text {
+      font-size: 17px;
+      line-height: 1.9;
+      color: var(--jade-900);
+    }
+
+    .narrative-text p {
+      margin-bottom: 1.2em;
+    }
+
+    .narrative-text p:last-child {
+      margin-bottom: 0;
+    }
+
+    .narrative-highlight {
+      color: var(--jade-600);
+      font-style: italic;
+      font-weight: 600;
+    }
+
+    /* 选择卡片 */
+    .choices-grid {
+      max-width: 720px;
+      margin: 0 auto 32px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+
+    .choice-card {
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(92, 171, 124, 0.2);
+      border-radius: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .choice-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(183, 229, 186, 0.5), transparent);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .choice-card:hover {
+      border-color: var(--jade-500);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-medium);
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .choice-card:hover::before {
+      opacity: 1;
+    }
+
+    .choice-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--jade-300), var(--jade-400));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      font-size: 18px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .choice-text {
+      font-size: 15px;
+      color: var(--jade-900);
+      font-weight: 600;
+      position: relative;
+      z-index: 1;
+    }
+
+    .choice-desc {
+      font-size: 13px;
+      color: var(--jade-600);
+      margin-top: 6px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* 输入区域 */
+    .input-area {
+      padding: 24px 32px;
+      border-top: 1px solid rgba(92, 171, 124, 0.2);
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(10px);
+    }
+
+    .input-wrapper {
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .input-field {
+      flex: 1;
+      padding: 16px 20px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(92, 171, 124, 0.3);
+      border-radius: 14px;
+      color: var(--jade-900);
+      font-family: inherit;
+      font-size: 15px;
+      resize: none;
+      outline: none;
+      transition: all 0.3s ease;
+      min-height: 56px;
+      max-height: 120px;
+    }
+
+    .input-field:focus {
+      border-color: var(--jade-500);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+      background: white;
+    }
+
+    .input-field::placeholder {
+      color: var(--jade-600);
+      opacity: 0.6;
+    }
+
+    .send-btn {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, var(--jade-500), var(--jade-600));
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      box-shadow: var(--shadow-soft);
+      color: white;
+    }
+
+    .send-btn:hover {
+      transform: scale(1.05);
+      box-shadow: var(--shadow-medium);
+    }
+
+    .send-btn:active {
+      transform: scale(0.98);
+    }
+
+    /* 右侧面板 */
+    .right-panel {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(20px);
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid rgba(92, 171, 124, 0.2);
+    }
+
+    .panel-section {
+      padding: 24px;
+      border-bottom: 1px solid rgba(92, 171, 124, 0.15);
+    }
+
+    .panel-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--jade-600);
+      margin-bottom: 16px;
+    }
+
+    /* 世界状态 */
+    .world-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      padding: 16px;
+      background: rgba(183, 229, 186, 0.35);
+      border-radius: 12px;
+      text-align: center;
+      border: 1px solid rgba(92, 171, 124, 0.2);
+    }
+
+    .stat-value {
+      font-family: 'Space Mono', monospace;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--jade-800);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--jade-600);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* 角色状态 */
+    .character-status {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-icon {
+      width: 32px;
+      height: 32px;
+      background: rgba(183, 229, 186, 0.4);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .status-info {
+      flex: 1;
+    }
+
+    .status-name {
+      font-size: 12px;
+      color: var(--jade-800);
+      margin-bottom: 4px;
+    }
+
+    .status-track {
+      height: 6px;
+      background: rgba(183, 229, 186, 0.4);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .status-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .status-fill.health {
+      width: 85%;
+      background: linear-gradient(90deg, var(--jade-500), var(--jade-400));
+    }
+
+    .status-fill.mana {
+      width: 60%;
+      background: linear-gradient(90deg, var(--jade-600), var(--jade-500));
+    }
+
+    .status-fill.energy {
+      width: 40%;
+      background: linear-gradient(90deg, #5CAB7C, #B7E5BA);
+    }
+
+    /* 物品栏 */
+    .inventory-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .inventory-slot {
+      aspect-ratio: 1;
+      background: rgba(183, 229, 186, 0.3);
+      border: 1px solid rgba(92, 171, 124, 0.2);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .inventory-slot:hover {
+      border-color: var(--jade-500);
+      background: rgba(183, 229, 186, 0.5);
+    }
+
+    .inventory-slot.empty {
+      opacity: 0.4;
+      color: var(--jade-600);
+    }
+
+    /* 日志 */
+    .log-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: rgba(183, 229, 186, 0.25);
+      border-radius: 12px;
+      max-height: 200px;
+    }
+
+    .log-entry {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--jade-800);
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(92, 171, 124, 0.2);
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-time {
+      color: var(--jade-600);
+      margin-right: 8px;
+      opacity: 0.7;
+    }
+
+    /* 响应式 */
+    @media (max-width: 1200px) {
+      .app-container {
+        grid-template-columns: 240px 1fr 280px;
+      }
+    }
+
+    @media (max-width: 992px) {
+      .app-container {
+        grid-template-columns: 1fr;
+      }
+      .sidebar, .right-panel {
+        display: none;
+      }
+    }
+
+    /* 动画效果 */
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-5px); }
+    }
+
+    .choice-card:hover .choice-icon {
+      animation: float 2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-texture"></div>
+  <div class="bg-grain"></div>
+
+  <div class="app-container">
+    <!-- 左侧边栏 -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon">📜</div>
+        <div class="logo-text">
+          AI 说书人
+          <span>Immersive Engine</span>
+        </div>
+      </div>
+
+      <nav class="nav-section">
+        <div class="nav-label">游戏</div>
+        <div class="nav-item active">
+          <span class="nav-icon">🎮</span>
+          当前冒险
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📚</span>
+          故事存档
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">🏆</span>
+          成就
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">⚙️</span>
+          设置
+        </div>
+      </nav>
+
+      <nav class="nav-section">
+        <div class="nav-label">工具</div>
+        <div class="nav-item">
+          <span class="nav-icon">🗺️</span>
+          世界地图
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">👤</span>
+          角色卡
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">📖</span>
+          传说典籍
+        </div>
+      </nav>
+
+      <div class="council-section">
+        <div class="nav-label">委员会在线</div>
+        <div class="council-list">
+          <div class="council-member">
+            <div class="member-avatar">N</div>
+            <div class="member-info">
+              <div class="member-name">Narrator</div>
+              <div class="member-role">旁白</div>
+            </div>
+            <div class="member-status"></div>
+          </div>
+          <div class="council-member">
+            <div class="member-avatar">W</div>
+            <div class="member-info">
+              <div class="member-name">World Keeper</div>
+              <div class="member-role">世界守护者</div>
+            </div>
+            <div class="member-status"></div>
+          </div>
+          <div class="council-member">
+            <div class="member-avatar">D</div>
+            <div class="member-info">
+              <div class="member-name">Drama Curator</div>
+              <div class="member-role">剧情策划</div>
+            </div>
+            <div class="member-status"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <header class="content-header">
+        <h1 class="scene-title">迷雾十字路口</h1>
+        <div class="scene-meta">
+          <span class="meta-badge">第一章 · 觉醒</span>
+          <span>第 12 幕</span>
+          <span>⏱️ 45 分钟</span>
+        </div>
+      </header>
+
+      <div class="story-container">
+        <article class="narrative-block">
+          <div class="narrative-text">
+            <p>你站在一片被阳光照亮的<span class="narrative-highlight">十字路口</span>，四周是茂密的森林、广阔的平原和蜿蜒的小溪。空气中弥漫着清晨特有的清新，偶尔可以听到远处传来的鸟鸣声。</p>
+            <p>四条道路由粗糙的石块铺成，两旁长满了青苔和野花。东边的道路似乎延伸得更远一些，尽头隐约可见一束微弱的光芒；而其他三条道路则显得较为平缓，没有特别明显的特征。</p>
+            <p>古老的石碑矗立在西边路口，上面刻着模糊不清的符文。北边的路上有块路标，虽然有些风化，但依然清晰地写着：<span class="narrative-highlight">「未知之路」</span>四个字。</p>
+          </div>
+        </article>
+
+        <div class="choices-grid">
+          <div class="choice-card">
+            <div class="choice-icon">🌲</div>
+            <div class="choice-text">向东前往古老森林</div>
+            <div class="choice-desc">追寻那束神秘的光芒</div>
+          </div>
+          <div class="choice-card">
+            <div class="choice-icon">🏔️</div>
+            <div class="choice-text">向北踏上未知之路</div>
+            <div class="choice-desc">路标所指的方向</div>
+          </div>
+          <div class="choice-card">
+            <div class="choice-icon">📜</div>
+            <div class="choice-text">仔细查看石碑符文</div>
+            <div class="choice-desc">或许隐藏着线索</div>
+          </div>
+          <div class="choice-card">
+            <div class="choice-icon">💭</div>
+            <div class="choice-text">自定义行动</div>
+            <div class="choice-desc">描述你想做的事</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-wrapper">
+          <textarea class="input-field" placeholder="描述你的行动，或选择上方的选项..." rows="1"></textarea>
+          <button class="send-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- 右侧面板 -->
+    <aside class="right-panel">
+      <div class="panel-section">
+        <div class="panel-title">世界状态</div>
+        <div class="world-stats">
+          <div class="stat-card">
+            <div class="stat-value">12</div>
+            <div class="stat-label">探索度 %</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">3</div>
+            <div class="stat-label">发现地点</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">2</div>
+            <div class="stat-label">NPC 相遇</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">5</div>
+            <div class="stat-label">收集物品</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">角色状态</div>
+        <div class="character-status">
+          <div class="status-bar">
+            <div class="status-icon">❤️</div>
+            <div class="status-info">
+              <div class="status-name">生命值</div>
+              <div class="status-track">
+                <div class="status-fill health"></div>
+              </div>
+            </div>
+          </div>
+          <div class="status-bar">
+            <div class="status-icon">✨</div>
+            <div class="status-info">
+              <div class="status-name">魔力值</div>
+              <div class="status-track">
+                <div class="status-fill mana"></div>
+              </div>
+            </div>
+          </div>
+          <div class="status-bar">
+            <div class="status-icon">⚡</div>
+            <div class="status-info">
+              <div class="status-name">体力值</div>
+              <div class="status-track">
+                <div class="status-fill energy"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">物品栏</div>
+        <div class="inventory-grid">
+          <div class="inventory-slot">🗡️</div>
+          <div class="inventory-slot">🛡️</div>
+          <div class="inventory-slot">🧪</div>
+          <div class="inventory-slot">🔑</div>
+          <div class="inventory-slot">📜</div>
+          <div class="inventory-slot empty">+</div>
+          <div class="inventory-slot empty">+</div>
+          <div class="inventory-slot empty">+</div>
+        </div>
+      </div>
+
+      <div class="panel-section" style="flex: 1;">
+        <div class="panel-title">事件日志</div>
+        <div class="log-container">
+          <div class="log-entry">
+            <span class="log-time">10:42</span>
+            抵达迷雾十字路口
+          </div>
+          <div class="log-entry">
+            <span class="log-time">10:38</span>
+            获得：古老的铜钥匙
+          </div>
+          <div class="log-entry">
+            <span class="log-time">10:35</span>
+            与旅人对话
+          </div>
+          <div class="log-entry">
+            <span class="log-time">10:28</span>
+            发现隐藏小径
+          </div>
+          <div class="log-entry">
+            <span class="log-time">10:15</span>
+            游戏开始
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // API 客户端
+    const API_BASE = '';
+
+    async function api(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE}/api${endpoint}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      return res.json();
+    }
+
+    // 游戏状态
+    let gameState = {
+      turnCount: 0,
+      isProcessing: false,
+    };
+
+    // 加载游戏状态
+    async function loadGameState() {
+      try {
+        const { data } = await api('/state');
+        updateUI(data);
+      } catch (err) {
+        console.error('Failed to load game state:', err);
+      }
+    }
+
+    // 更新 UI
+    function updateUI(state) {
+      // 更新场景标题
+      if (state.scene?.name) {
+        document.querySelector('.scene-title').textContent = state.scene.name;
+      }
+      // 更新回合数
+      if (state.turnCount !== undefined) {
+        gameState.turnCount = state.turnCount;
+      }
+    }
+
+    // 添加叙事内容
+    function addNarrative(content, isPlayer = false) {
+      const container = document.querySelector('.story-container');
+      const block = document.createElement('article');
+      block.className = 'narrative-block';
+      block.style.animation = 'fadeInUp 0.6s ease-out';
+
+      if (isPlayer) {
+        block.innerHTML = `<div class="narrative-text" style="font-style: italic; opacity: 0.8;"><p>💭 ${escapeHtml(content)}</p></div>`;
+      } else {
+        block.innerHTML = `<div class="narrative-text"><p>${escapeHtml(content).replace(/\n/g, '</p><p>')}</p></div>`;
+      }
+
+      // 插入到选择卡片之前
+      const choicesGrid = container.querySelector('.choices-grid');
+      container.insertBefore(block, choicesGrid);
+
+      // 滚动到底部
+      block.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    // 转义 HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // 处理玩家输入
+    async function processInput(input) {
+      if (gameState.isProcessing || !input.trim()) return;
+
+      gameState.isProcessing = true;
+      const textarea = document.querySelector('.input-field');
+      const sendBtn = document.querySelector('.send-btn');
+      textarea.disabled = true;
+      sendBtn.style.opacity = '0.5';
+
+      // 显示玩家输入
+      addNarrative(input, true);
+      textarea.value = '';
+      textarea.style.height = 'auto';
+
+      try {
+        const { data } = await api('/turn', {
+          method: 'POST',
+          body: { input },
+        });
+
+        // 显示 AI 响应
+        if (data.narrative) {
+          addNarrative(data.narrative);
+        }
+
+        // 更新状态
+        gameState.turnCount = data.stateSnapshot?.turnCount || gameState.turnCount + 1;
+
+        // 添加到日志
+        addLogEntry(`回合 ${gameState.turnCount}: 玩家行动`);
+
+      } catch (err) {
+        console.error('Failed to process turn:', err);
+        addNarrative('⚠️ 连接失败，请检查服务器是否运行。', false);
+      } finally {
+        gameState.isProcessing = false;
+        textarea.disabled = false;
+        sendBtn.style.opacity = '1';
+        textarea.focus();
+      }
+    }
+
+    // 添加日志条目
+    function addLogEntry(text) {
+      const logContainer = document.querySelector('.log-container');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      entry.innerHTML = `<span class="log-time">${time}</span>${escapeHtml(text)}`;
+      logContainer.insertBefore(entry, logContainer.firstChild);
+    }
+
+    // 输入框自动调整高度
+    const textarea = document.querySelector('.input-field');
+    textarea.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+
+    // 发送按钮
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        processInput(textarea.value);
+      }
+    });
+
+    document.querySelector('.send-btn').addEventListener('click', () => {
+      processInput(textarea.value);
+    });
+
+    // 选择卡片点击
+    document.querySelectorAll('.choice-card').forEach(card => {
+      card.addEventListener('click', function() {
+        const text = this.querySelector('.choice-text').textContent;
+        processInput(text);
+      });
+    });
+
+    // 导航项切换
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', function() {
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    // 初始化
+    loadGameState();
+
+    // 检查 Provider 状态
+    api('/providers').then(({ data }) => {
+      console.log('AI Providers:', data);
+      const available = Object.entries(data.availability)
+        .filter(([, v]) => v)
+        .map(([k]) => k);
+      if (available.length === 0) {
+        addNarrative('⚠️ 没有可用的 AI Provider，请检查配置。', false);
+      }
+    }).catch(console.error);
+  </script>
+</body>
+</html>
