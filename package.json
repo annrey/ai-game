@@ -15,9 +15,16 @@
     "demo:roleplay": "tsx src/demo.ts --mode roleplay",
     "test:local": "tsx src/test-local.ts",
     "server": "tsx src/server.ts",
-    "server:watch": "tsx watch src/server.ts"
+    "server:watch": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "docker:build": "docker build -t ai-storyteller .",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
   },
   "dependencies": {
+    "better-sqlite3": "^12.8.0",
     "chalk": "^5.3.0",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
@@ -29,12 +36,15 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.2"
   }
 }

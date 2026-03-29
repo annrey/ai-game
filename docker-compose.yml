@@ -1,0 +1,18 @@
+services:
+  game:
+    build: .
+    container_name: ai-storyteller
+    ports:
+      - "3000:3000"
+    volumes:
+      - game-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DEFAULT_PROVIDER=ollama
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_MODEL=qwen2.5:7b
+    restart: unless-stopped
+
+volumes:
+  game-data:
+    driver: local

@@ -25,4 +25,7 @@ export { createAIBattle } from './modes/ai-battle.js';
 export { createNPCSandbox, SandboxTemplates } from './modes/npc-sandbox.js';
 export { createChatRoleplay, RoleplayTemplates } from './modes/chat-roleplay.js';
 
+export { MemoryManager, MemoryStore } from './memory/index.js';
+export type { MemoryEntry, MemoryType, MemoryManagerConfig } from './memory/index.js';
+
 export type * from './types/game.js';

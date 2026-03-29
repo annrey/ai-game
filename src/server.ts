@@ -27,6 +27,8 @@ const engine = new GameEngine({
   config: gameConfig,
   providerFactory,
   dataPath: './data/saves',
+  memoryDbPath: './data/memories.db',
+  sessionId: `session-${Date.now()}`,
 });
 
 const app = express();
@@ -204,6 +206,53 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 获取记忆列表
+app.get('/api/memories', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 50;
+    const type = req.query.type as string | undefined;
+    const mm = engine.getMemoryManager();
+    const memories = mm.getAllMemories({
+      limit,
+      type: type as any,
+    });
+    res.json({
+      success: true,
+      data: {
+        memories,
+        count: mm.getMemoryCount(),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// 搜索记忆
+app.get('/api/memories/search', (req, res) => {
+  try {
+    const query = req.query.q as string;
+    if (!query) {
+      res.status(400).json({ success: false, error: 'query parameter "q" is required' });
+      return;
+    }
+    const mm = engine.getMemoryManager();
+    const memories = mm.recall(query, { limit: 20 });
+    res.json({
+      success: true,
+      data: { memories },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // 启动服务器
 app.listen(PORT, () => {
   console.log(`
@@ -225,6 +274,8 @@ app.listen(PORT, () => {
   POST /api/load          加载游戏
   POST /api/reset         重置游戏
   GET  /api/turn-count    获取回合数
+  GET  /api/memories       获取记忆列表
+  GET  /api/memories/search?q=关键词  搜索记忆
   `);
 });
 

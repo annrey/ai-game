@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+dist
+.git
+.gitignore
+.env
+*.md
+*.test.ts
+src/test
+src/**/__tests__
+vitest.config.ts
+coverage
+.DS_Store
+data
