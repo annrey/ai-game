@@ -22,15 +22,16 @@ export function loadTestConfig(): void {
   const defaultEnvPath = path.join(cwd, '.env');
 
   // 先加载 .env（如果存在）
+  // 使用 override: false 确保不会覆盖已存在的环境变量
   if (fs.existsSync(defaultEnvPath)) {
-    dotenv.config({ path: defaultEnvPath });
+    dotenv.config({ path: defaultEnvPath, override: false });
   }
 
-  // 然后加载 .env.test.local（如果存在），会覆盖 .env 中的同名变量
-  // 但不会影响已存在的环境变量（环境变量优先级最高）
+  // 然后加载 .env.test.local（如果存在）
+  // 使用 override: false 确保不会覆盖已存在的环境变量
   if (fs.existsSync(testEnvPath)) {
     console.log('📄 检测到测试环境配置，加载 .env.test.local');
-    dotenv.config({ path: testEnvPath });
+    dotenv.config({ path: testEnvPath, override: false });
   }
 }
 

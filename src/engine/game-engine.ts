@@ -13,10 +13,14 @@ import { NPCDirector } from '../agents/npc-director.js';
 import { RuleArbiter } from '../agents/rule-arbiter.js';
 import { DramaCurator } from '../agents/drama-curator.js';
 import { MemoryManager } from '../memory/memory-manager.js';
-import type { SceneState } from '../types/scene.js';
+import { ItemValidator } from '../validators/item-validator.js';
+import { QuestValidator } from '../validators/quest-validator.js';
+import type { SceneState, Quest } from '../types/scene.js';
 import type { GameMode, Achievement, AchievementType, GameConfig } from '../types/game.js';
 import type { AgentRole, AgentResponse } from '../types/agent.js';
 import type { GameAgent } from '../types/agent.js';
+import type { Item, ItemType } from '../types/economy.js';
+import type { ItemGenerationContext, QuestGenerationContext } from '../types/validator.js';
 import { v4 as uuidv4 } from 'uuid';
 import { TIME, MEMORY, TEMPERATURE, COMMANDS, GAME } from '../constants.js';
 
@@ -88,6 +92,12 @@ export class GameEngine {
   private uniqueItemsCollected = new Set<string>();
   private uniqueLocationsVisited = new Set<string>();
 
+  // 任务生成系统
+  private questValidator: QuestValidator;
+
+  // 物品生成系统
+  private itemValidator: ItemValidator;
+
   constructor(options: EngineOptions) {
     this.config = options.config;
     this.providerFactory = options.providerFactory;
@@ -99,10 +109,13 @@ export class GameEngine {
       sessionId: options.sessionId ?? `session-${Date.now()}`,
       maxContextChars: options.config.memoryMaxContextChars,
     });
+    this.questValidator = new QuestValidator();
+    this.itemValidator = new ItemValidator();
 
     this.initAgents();
     this.setupEventHandlers();
     this.startAutoWorldTick();
+    this.setupQuestEventHandlers();
   }
 
   /** 启动自动世界演化定时器 */
@@ -201,7 +214,7 @@ export class GameEngine {
 
     if (enabled.has('npc-director')) {
       const np = this.providerFactory.getForAgent('npc-director');
-      const nd = new NPCDirector(np.provider, np.model);
+      const nd = new NPCDirector(np.provider, np.model, undefined, this.eventBus);
       nd.setMaxHistoryTurns(this.config.maxHistoryTurns);
       this.agents.set('npc-director', nd);
       this.narrator.registerSubAgent(nd);
@@ -217,7 +230,7 @@ export class GameEngine {
 
     if (enabled.has('drama-curator')) {
       const dp = this.providerFactory.getForAgent('drama-curator');
-      const dc = new DramaCurator(dp.provider, dp.model);
+      const dc = new DramaCurator(dp.provider, dp.model, undefined, this.eventBus);
       dc.setMaxHistoryTurns(this.config.maxHistoryTurns);
       this.agents.set('drama-curator', dc);
       this.narrator.registerSubAgent(dc);
@@ -235,6 +248,65 @@ export class GameEngine {
     // 错误处理
     this.eventBus.on(GameEvents.AGENT_ERROR, (event) => {
       console.error(`[Agent Error]`, event.payload);
+    });
+
+    // 物品事件处理
+    this.eventBus.on(GameEvents.ITEM_CREATED, (event) => {
+      if (this.config.logging) {
+        const payload = event.payload as any;
+        console.log(`[Item] 创建：${payload.item?.name}`);
+      }
+    });
+
+    this.eventBus.on(GameEvents.ITEM_REWARD, (event) => {
+      if (this.config.logging) {
+        const payload = event.payload as any;
+        console.log(`[Item] 任务奖励：${payload.item?.name}, 任务 ID: ${payload.questId}`);
+      }
+    });
+
+    this.eventBus.on(GameEvents.ITEM_DISCOVERED, (event) => {
+      if (this.config.logging) {
+        const payload = event.payload as any;
+        console.log(`[Item] 探索发现：${payload.item?.name}, 地点：${payload.location}`);
+      }
+    });
+
+    this.eventBus.on(GameEvents.ITEM_GIFT, (event) => {
+      if (this.config.logging) {
+        const payload = event.payload as any;
+        console.log(`[Item] NPC 赠与：${payload.item?.name}, NPC: ${payload.npcName}`);
+      }
+    });
+  }
+
+  private setupQuestEventHandlers(): void {
+    this.eventBus.on('quest:generated', (event) => {
+      const { quest, source } = event.payload as { quest: Quest; source: string };
+      if (this.config.logging) {
+        console.log(`[Quest] 新任务生成：${quest.title} (来源：${source})`);
+      }
+    });
+
+    this.eventBus.on('quest:player_action_trigger', (event) => {
+      const { action, quest } = event.payload as { action: string; quest?: Quest };
+      if (this.config.logging && quest) {
+        console.log(`[Quest] 玩家行为触发任务：${action} → ${quest.title}`);
+      }
+    });
+
+    this.eventBus.on('quest:story_trigger', (event) => {
+      const { plot, quest } = event.payload as { plot: string; quest?: Quest };
+      if (this.config.logging && quest) {
+        console.log(`[Quest] 剧情触发任务：${plot} → ${quest.title}`);
+      }
+    });
+
+    this.eventBus.on('quest:random_trigger', (event) => {
+      const { quest } = event.payload as { quest?: Quest };
+      if (this.config.logging && quest) {
+        console.log(`[Quest] 随机事件触发任务：${quest.title}`);
+      }
     });
   }
 
@@ -598,6 +670,13 @@ export class GameEngine {
     }
   }
 
+  /** 更新物品进度并触发成就检查 */
+  updateItemProgress(itemName: string): void {
+    this.uniqueItemsCollected.add(itemName);
+    this.updateAchievementProgress('collector', this.uniqueItemsCollected.size);
+    this.updateAchievementProgress('treasure_hunter', this.uniqueItemsCollected.size);
+  }
+
   /** 检查大师成就 */
   private checkMasterAchievement(): void {
     const nonSecretAchievements = ACHIEVEMENTS.filter(a => !a.secret);
@@ -675,5 +754,554 @@ export class GameEngine {
       total: nonSecret.length,
       unlocked: nonSecret.filter(a => this.unlockedAchievements.has(a.id)).length,
     };
+  }
+
+  // ============ 任务生成系统 ============
+
+  /**
+   * 创建任务
+   * @param quest 任务对象
+   * @returns 验证结果和创建的任务
+   */
+  async createQuest(quest: Quest): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const validation = this.questValidator.validateQuest(quest);
+    
+    if (!validation.valid) {
+      console.error('[QuestValidator] 任务验证失败:', validation.errors);
+      return {
+        success: false,
+        errors: validation.errors,
+      };
+    }
+
+    this.sceneManager.updateQuest({
+      questId: quest.questId,
+      title: quest.title,
+      status: quest.status,
+      description: quest.description,
+    });
+
+    this.eventBus.emit('quest:generated', { quest, source: 'engine' }, 'engine');
+    
+    return {
+      success: true,
+      quest,
+    };
+  }
+
+  /**
+   * 根据事件生成任务
+   * @param eventType 事件类型（如 'help_npc', 'explore_location', 'combat'）
+   * @param context 事件上下文
+   * @returns 生成的任务或错误
+   */
+  async generateQuestFromEvent(
+    eventType: string,
+    context: {
+      playerLevel?: number;
+      currentLocation?: string;
+      relatedNPC?: string;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      [key: string]: unknown;
+    }
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    try {
+      const questContext: QuestGenerationContext = {
+        playerLevel: context.playerLevel || 1,
+        currentLocation: context.currentLocation || this.stateStore.getState().currentLocation,
+        relatedNPC: context.relatedNPC,
+        difficulty: context.difficulty || 'medium',
+        ...context,
+      };
+
+      const quest = await this.questValidator.generateQuest(questContext);
+      
+      this.sceneManager.updateQuest({
+        questId: quest.questId,
+        title: quest.title,
+        status: quest.status,
+        description: quest.description,
+      });
+
+      this.eventBus.emit('quest:player_action_trigger', { 
+        action: eventType, 
+        quest,
+        context 
+      }, 'engine');
+
+      return {
+        success: true,
+        quest,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[QuestGeneration] 事件任务生成失败:', errorMessage);
+      return {
+        success: false,
+        errors: [errorMessage],
+      };
+    }
+  }
+
+  /**
+   * 生成随机任务
+   * @param context 任务生成上下文
+   * @returns 生成的任务或错误
+   */
+  async generateRandomQuest(
+    context: {
+      playerLevel?: number;
+      plotType?: 'story' | 'side' | 'daily';
+      difficulty?: 'easy' | 'medium' | 'hard';
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    try {
+      const state = this.stateStore.getState();
+      const questContext: QuestGenerationContext = {
+        playerLevel: context.playerLevel || 1,
+        currentLocation: state.currentLocation,
+        difficulty: context.difficulty || 'medium',
+        plotType: context.plotType || 'side',
+      };
+
+      const quest = await this.questValidator.generateQuest(questContext);
+      
+      this.sceneManager.updateQuest({
+        questId: quest.questId,
+        title: quest.title,
+        status: quest.status,
+        description: quest.description,
+      });
+
+      this.eventBus.emit('quest:random_trigger', { quest, context }, 'engine');
+
+      return {
+        success: true,
+        quest,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[QuestGeneration] 随机任务生成失败:', errorMessage);
+      return {
+        success: false,
+        errors: [errorMessage],
+      };
+    }
+  }
+
+  /**
+   * 获取任务验证器（供其他模块使用）
+   */
+  getQuestValidator(): QuestValidator {
+    return this.questValidator;
+  }
+
+  // ============ 任务生成触发器 ============
+
+  /**
+   * 玩家行为触发任务生成
+   * @param action 玩家行为类型（如 'help_npc', 'explore_location', 'combat', 'trade'）
+   * @param context 行为上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerQuestFromPlayerAction(
+    action: string,
+    context: {
+      playerLevel?: number;
+      currentLocation?: string;
+      relatedNPC?: string;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      [key: string]: unknown;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const state = this.stateStore.getState();
+    const mergedContext = {
+      playerLevel: context.playerLevel || 1,
+      currentLocation: context.currentLocation || state.currentLocation,
+      relatedNPC: context.relatedNPC,
+      difficulty: context.difficulty || 'medium',
+      ...context,
+    };
+
+    const result = await this.generateQuestFromEvent(action, mergedContext);
+    
+    if (result.success && result.quest) {
+      this.eventBus.emit('quest:player_action_trigger', {
+        action,
+        quest: result.quest,
+        context: mergedContext,
+      }, 'engine');
+    }
+
+    return result;
+  }
+
+  /**
+   * 剧情发展触发任务生成
+   * @param plotId 剧情点 ID
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerQuestFromStory(
+    plotId: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      currentLocation?: string;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const dramaCurator = this.agents.get('drama-curator') as DramaCurator;
+    if (!dramaCurator) {
+      return {
+        success: false,
+        errors: ['DramaCurator 未启用'],
+      };
+    }
+
+    const state = this.stateStore.getState();
+    const mergedContext = {
+      playerLevel: context.playerLevel || 1,
+      currentLocation: context.currentLocation || state.currentLocation,
+      difficulty: context.difficulty || 'medium',
+      ...context,
+    };
+
+    const result = await dramaCurator.generateStoryQuest(plotId, mergedContext);
+    
+    if (result.success && result.quest) {
+      const plot = (dramaCurator as any).plotArcs?.find((p: any) => p.id === plotId);
+      this.eventBus.emit('quest:story_trigger', {
+        plot: plot?.name || plotId,
+        quest: result.quest,
+      }, 'agent');
+    }
+
+    return result;
+  }
+
+  /**
+   * 随机事件触发任务生成
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerRandomQuest(
+    context: {
+      playerLevel?: number;
+      plotType?: 'story' | 'side' | 'daily';
+      difficulty?: 'easy' | 'medium' | 'hard';
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const result = await this.generateRandomQuest(context);
+    
+    if (result.success && result.quest) {
+      this.eventBus.emit('quest:random_trigger', {
+        quest: result.quest,
+        context,
+      }, 'engine');
+    }
+
+    return result;
+  }
+
+  /**
+   * NPC 交互触发任务生成
+   * @param npcId NPC 标识
+   * @param playerAction 玩家行为
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerQuestFromNPCInteraction(
+    npcId: string,
+    playerAction: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      relationship?: number;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const npcDirector = this.agents.get('npc-director') as NPCDirector;
+    if (!npcDirector) {
+      return {
+        success: false,
+        errors: ['NPCDirector 未启用'],
+      };
+    }
+
+    const result = await npcDirector.generateQuestFromNPC(npcId, playerAction, context);
+    
+    if (result.success && result.quest) {
+      const profile = (npcDirector as any).npcProfiles?.get(npcId);
+      this.eventBus.emit('quest:npc_interaction', {
+        npcId,
+        npcName: profile?.name || npcId,
+        playerAction,
+        quest: result.quest,
+      }, 'agent');
+    }
+
+    return result;
+  }
+
+  /**
+   * 探索地点触发任务生成
+   * @param location 地点名称
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerQuestFromExploration(
+    location: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      isFirstVisit?: boolean;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const state = this.stateStore.getState();
+    const isFirstVisit = context.isFirstVisit ?? !state.playerState.visitedLocations.includes(location);
+    
+    const questType = isFirstVisit ? 'explore_new_location' : 'explore_location';
+    const difficulty = isFirstVisit ? 'medium' : (context.difficulty || 'easy');
+    
+    const result = await this.generateQuestFromEvent(questType, {
+      ...context,
+      currentLocation: location,
+      difficulty,
+    });
+    
+    if (result.success && result.quest) {
+      this.eventBus.emit('quest:exploration', {
+        location,
+        isFirstVisit,
+        quest: result.quest,
+      }, 'engine');
+    }
+
+    return result;
+  }
+
+  /**
+   * 战斗事件触发任务生成
+   * @param enemyType 敌人类型
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async triggerQuestFromCombat(
+    enemyType: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      isVictory?: boolean;
+      enemyCount?: number;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    const questType = context.isVictory ? 'combat_victory' : 'combat_encounter';
+    
+    const result = await this.generateQuestFromEvent(questType, {
+      ...context,
+      enemyType,
+    });
+    
+    if (result.success && result.quest) {
+      this.eventBus.emit('quest:combat', {
+        enemyType,
+        isVictory: context.isVictory,
+        quest: result.quest,
+      }, 'engine');
+    }
+
+    return result;
+  }
+
+  /**
+   * 定时触发随机任务（可配置概率）
+   * @param probability 触发概率（0-1 之间，默认 0.1 即 10%）
+   * @param context 上下文
+   * @returns 生成的任务或 null（未触发）
+   */
+  async triggerTimedRandomQuest(
+    probability: number = 0.1,
+    context: {
+      playerLevel?: number;
+      plotType?: 'story' | 'side' | 'daily';
+    } = {}
+  ): Promise<{ triggered: boolean; quest?: Quest; errors?: string[] }> {
+    if (Math.random() > probability) {
+      return { triggered: false };
+    }
+
+    const result = await this.generateRandomQuest(context);
+    
+    return {
+      triggered: result.success,
+      quest: result.quest,
+      errors: result.errors,
+    };
+  }
+
+  // ============ 物品创造系统 ============
+
+  /**
+   * 创建物品
+   * @param item 要创建的物品
+   * @param addToInventory 是否添加到玩家背包
+   * @returns 创建结果
+   */
+  createItem(item: Item, addToInventory: boolean = true): {
+    success: boolean;
+    message: string;
+    item?: Item;
+  } {
+    const validation = this.itemValidator.validateItem(item);
+    if (!validation.valid) {
+      return {
+        success: false,
+        message: `物品验证失败：${validation.errors.join(', ')}`,
+      };
+    }
+
+    if (validation.warnings.length > 0) {
+      console.warn('[ItemValidator] 警告:', validation.warnings.join(', '));
+    }
+
+    if (addToInventory) {
+      this.sceneManager.updateInventoryItem({
+        name: item.name,
+        action: 'add',
+        quantity: 1,
+        description: item.description,
+      });
+      this.updateItemProgress(item.name);
+    }
+
+    this.eventBus.emit('item:created', { item, reason: 'system' }, 'engine');
+
+    return {
+      success: true,
+      message: `成功创建物品：${item.name}`,
+      item,
+    };
+  }
+
+  /**
+   * 从任务奖励生成物品
+   * @param context 物品生成上下文
+   * @returns 生成的物品
+   */
+  async generateItemFromReward(context: {
+    questId?: string;
+    playerLevel?: number;
+    rarity?: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+    itemType?: ItemType;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    item?: Item;
+  }> {
+    try {
+      const item = await this.itemValidator.generateItem({
+        itemType: context.itemType || 'misc',
+        rarity: context.rarity || 'common',
+        playerLevel: context.playerLevel || 1,
+        reason: 'reward',
+        relatedQuest: context.questId,
+      } as ItemGenerationContext);
+
+      const result = this.createItem(item, true);
+      
+      if (result.success) {
+        this.eventBus.emit('item:reward', { item, questId: context.questId }, 'engine');
+      }
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        message: `生成任务奖励物品失败：${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * 从探索发现生成物品
+   * @param context 物品生成上下文
+   * @returns 生成的物品
+   */
+  async generateItemFromDiscovery(context: {
+    location?: string;
+    playerLevel?: number;
+    rarity?: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+    itemType?: ItemType;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    item?: Item;
+  }> {
+    try {
+      const item = await this.itemValidator.generateItem({
+        itemType: context.itemType || 'misc',
+        rarity: context.rarity || 'common',
+        playerLevel: context.playerLevel || 1,
+        reason: 'discovery',
+      } as ItemGenerationContext);
+
+      const result = this.createItem(item, true);
+
+      if (result.success) {
+        this.eventBus.emit('item:discovered', { item, location: context.location }, 'engine');
+      }
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        message: `生成探索发现物品失败：${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * 从 NPC 赠与生成物品
+   * @param npcId NPC ID
+   * @param npcName NPC 名称
+   * @param context 物品生成上下文
+   * @returns 生成的物品
+   */
+  async generateItemFromGift(
+    npcId: string,
+    npcName: string,
+    context: {
+      playerLevel?: number;
+      rarity?: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+      itemType?: ItemType;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    item?: Item;
+  }> {
+    try {
+      const item = await this.itemValidator.generateItem({
+        itemType: context.itemType || 'misc',
+        rarity: context.rarity || 'common',
+        playerLevel: context.playerLevel || 1,
+        reason: 'gift',
+      } as ItemGenerationContext);
+
+      const result = this.createItem(item, true);
+
+      if (result.success) {
+        this.eventBus.emit('item:gift', { item, npcId, npcName }, 'engine');
+      }
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        message: `生成 NPC 赠与物品失败：${errorMessage}`,
+      };
+    }
   }
 }

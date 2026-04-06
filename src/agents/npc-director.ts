@@ -6,13 +6,15 @@
 import { BaseAgent } from './base-agent.js';
 import type { AIProvider } from '../types/provider.js';
 import type { AgentConfig, AgentRequest } from '../types/agent.js';
-import type { NPCState, GameTime } from '../types/scene.js';
+import type { NPCState, GameTime, Quest } from '../types/scene.js';
 import { MemoryManager } from '../memory/memory-manager.js';
 import type { MemoryType } from '../memory/types.js';
 import { ScheduleManager } from '../engine/schedule-manager.js';
 import { TAVERN_NPC_SCHEDULES } from '../types/schedule.js';
 import { RelationshipManager } from '../engine/relationship-manager.js';
 import { TAVERN_NPC_RELATIONSHIPS } from '../types/relationship.js';
+import { QuestValidator } from '../validators/quest-validator.js';
+import type { QuestGenerationContext } from '../types/validator.js';
 
 interface NPCActivity {
   description: string;
@@ -108,11 +110,32 @@ export class NPCDirector extends BaseAgent {
   private currentTurn = 0;
   private scheduleManager: ScheduleManager;
   private relationshipManager: RelationshipManager;
+  private questValidator: QuestValidator;
+  private eventBus?: { 
+    emit: (
+      type: string, 
+      payload?: Record<string, unknown>, 
+      source?: 'engine' | 'agent' | 'player' | 'system' | 'world-keeper'
+    ) => void 
+  };
 
-  constructor(provider: AIProvider, model?: string, configOverride?: Partial<AgentConfig>) {
+  constructor(
+    provider: AIProvider, 
+    model?: string, 
+    configOverride?: Partial<AgentConfig>,
+    eventBus?: { 
+      emit: (
+        type: string, 
+        payload?: Record<string, unknown>, 
+        source?: 'engine' | 'agent' | 'player' | 'system' | 'world-keeper'
+      ) => void 
+    }
+  ) {
     super({ ...DEFAULT_CONFIG, ...configOverride }, provider, model);
     this.scheduleManager = new ScheduleManager();
     this.relationshipManager = new RelationshipManager();
+    this.questValidator = new QuestValidator();
+    this.eventBus = eventBus;
     // 加载预定义的日程模板
     this.scheduleManager.loadScheduleTemplates(TAVERN_NPC_SCHEDULES);
     // 加载预定义的关系
@@ -528,5 +551,239 @@ export class NPCDirector extends BaseAgent {
   /** 获取所有关系 */
   getAllRelationships() {
     return this.relationshipManager.getAllRelationships();
+  }
+
+  // ============ 任务生成方法 ============
+
+  /**
+   * 根据 NPC 交互生成任务
+   * @param npcId NPC 标识
+   * @param playerAction 玩家行为
+   * @param context 上下文信息
+   * @returns 生成的任务或错误
+   */
+  async generateQuestFromNPC(
+    npcId: string,
+    playerAction: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      relationship?: number;
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    try {
+      const profile = this.npcProfiles.get(npcId);
+      if (!profile) {
+        return {
+          success: false,
+          errors: [`NPC ${npcId} 不存在`],
+        };
+      }
+
+      const questContext: QuestGenerationContext = {
+        playerLevel: context.playerLevel || 1,
+        currentLocation: this.getCurrentLocation(),
+        relatedNPC: profile.name,
+        difficulty: context.difficulty || 'medium',
+        plotType: this.determinePlotType(playerAction, context.relationship),
+        eventType: 'npc_interaction',
+        npcPersonality: profile.personality,
+        npcGoals: profile.goals,
+      };
+
+      const quest = await this.questValidator.generateQuest(questContext);
+      
+      if (this.eventBus) {
+        this.eventBus.emit('quest:npc_generated', { 
+          quest, 
+          npcId, 
+          npcName: profile.name,
+          playerAction 
+        }, 'agent');
+      }
+
+      return {
+        success: true,
+        quest,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[NPCDirector] NPC 任务生成失败:', errorMessage);
+      return {
+        success: false,
+        errors: [errorMessage],
+      };
+    }
+  }
+
+  /**
+   * 根据 NPC 请求生成帮助任务
+   * @param npcId NPC 标识
+   * @param requestType 请求类型（如 'fetch', 'escort', 'combat', 'information'）
+   * @param context 上下文
+   * @returns 生成的任务或错误
+   */
+  async generateHelpQuest(
+    npcId: string,
+    requestType: string,
+    context: {
+      playerLevel?: number;
+      difficulty?: 'easy' | 'medium' | 'hard';
+      target?: string;
+      reward?: { gold?: number; exp?: number };
+    } = {}
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    try {
+      const profile = this.npcProfiles.get(npcId);
+      if (!profile) {
+        return {
+          success: false,
+          errors: [`NPC ${npcId} 不存在`],
+        };
+      }
+
+      const questContext: QuestGenerationContext = {
+        playerLevel: context.playerLevel || 1,
+        currentLocation: this.getCurrentLocation(),
+        relatedNPC: profile.name,
+        difficulty: context.difficulty || 'medium',
+        plotType: 'side',
+        eventType: `help_${requestType}`,
+        npcPersonality: profile.personality,
+        npcGoals: profile.goals,
+        requestType,
+        target: context.target,
+      };
+
+      const quest = await this.questValidator.generateQuest(questContext);
+      
+      if (this.eventBus) {
+        this.eventBus.emit('quest:npc_help', { 
+          quest, 
+          npcId, 
+          npcName: profile.name,
+          requestType 
+        }, 'agent');
+      }
+
+      return {
+        success: true,
+        quest,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[NPCDirector] NPC 帮助任务生成失败:', errorMessage);
+      return {
+        success: false,
+        errors: [errorMessage],
+      };
+    }
+  }
+
+  /**
+   * 根据关系变化生成任务
+   * @param npcId NPC 标识
+   * @param relationshipChange 关系变化值
+   * @param reason 变化原因
+   * @returns 生成的任务或错误
+   */
+  async generateRelationshipQuest(
+    npcId: string,
+    relationshipChange: number,
+    reason: string
+  ): Promise<{ success: boolean; quest?: Quest; errors?: string[] }> {
+    try {
+      const profile = this.npcProfiles.get(npcId);
+      if (!profile) {
+        return {
+          success: false,
+          errors: [`NPC ${npcId} 不存在`],
+        };
+      }
+
+      const questContext: QuestGenerationContext = {
+        playerLevel: 1,
+        currentLocation: this.getCurrentLocation(),
+        relatedNPC: profile.name,
+        difficulty: 'medium',
+        plotType: 'side',
+        eventType: 'relationship_change',
+        npcPersonality: profile.personality,
+        relationshipChange,
+        reason,
+      };
+
+      const quest = await this.questValidator.generateQuest(questContext);
+      
+      if (this.eventBus) {
+        this.eventBus.emit('quest:relationship', { 
+          quest, 
+          npcId, 
+          npcName: profile.name,
+          relationshipChange,
+          reason 
+        }, 'agent');
+      }
+
+      return {
+        success: true,
+        quest,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[NPCDirector] 关系任务生成失败:', errorMessage);
+      return {
+        success: false,
+        errors: [errorMessage],
+      };
+    }
+  }
+
+  /**
+   * 获取当前地点（从 NPC 状态推断）
+   */
+  private getCurrentLocation(): string {
+    const presentNPCs = this.getPresentNPCIds();
+    if (presentNPCs.length > 0) {
+      const firstNPC = presentNPCs[0];
+      const scheduleState = this.getNPCScheduleState(firstNPC);
+      if (scheduleState?.location) {
+        return scheduleState.location;
+      }
+    }
+    return '未知地点';
+  }
+
+  /**
+   * 根据玩家行为确定任务类型
+   */
+  private determinePlotType(playerAction: string, relationship?: number): 'story' | 'side' | 'daily' {
+    if (relationship && relationship > 80) {
+      return 'story';
+    }
+    
+    const actionLower = playerAction.toLowerCase();
+    if (actionLower.includes('紧急') || actionLower.includes('危险') || actionLower.includes('战斗')) {
+      return 'story';
+    }
+    
+    if (actionLower.includes('日常') || actionLower.includes('小忙')) {
+      return 'daily';
+    }
+    
+    return 'side';
+  }
+
+  /**
+   * 设置事件总线（用于解耦）
+   */
+  setEventBus(eventBus: { 
+    emit: (
+      type: string, 
+      payload?: Record<string, unknown>, 
+      source?: 'engine' | 'agent' | 'player' | 'system' | 'world-keeper'
+    ) => void 
+  }) {
+    this.eventBus = eventBus;
   }
 }

@@ -9,8 +9,11 @@ import type {
   Shop,
   EconomyConfig,
   EconomyStats,
+  ItemType,
 } from '../types/economy.js';
 import { TAVERN_ITEMS, DEFAULT_ECONOMY_CONFIG } from '../types/economy.js';
+import { ItemValidator } from '../validators/item-validator.js';
+import type { ItemGenerationContext } from '../types/validator.js';
 
 export class EconomyManager {
   private items = new Map<string, Item>();
@@ -18,10 +21,12 @@ export class EconomyManager {
   private config: EconomyConfig;
   private playerGold: number;
   private playerInventory: Item[] = [];
+  private itemValidator: ItemValidator;
 
   constructor(config: Partial<EconomyConfig> = {}) {
     this.config = { ...DEFAULT_ECONOMY_CONFIG, ...config };
     this.playerGold = this.config.startingGold;
+    this.itemValidator = new ItemValidator();
     this.loadItems(TAVERN_ITEMS);
   }
 
@@ -302,5 +307,246 @@ export class EconomyManager {
     this.transactions = [];
     this.items.clear();
     this.loadItems(TAVERN_ITEMS);
+  }
+
+  // ============ 物品生成与平衡系统 ============
+
+  /**
+   * 生成平衡性物品
+   * @param context 物品生成上下文
+   * @returns 生成的物品
+   */
+  async generateBalancedItem(context: {
+    itemType?: ItemType;
+    rarity?: 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+    playerLevel?: number;
+    reason?: 'reward' | 'discovery' | 'gift' | 'purchase';
+    maxPrice?: number;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    item?: Item;
+  }> {
+    try {
+      const {
+        itemType = 'misc',
+        rarity = 'common',
+        playerLevel = 1,
+        reason = 'reward',
+        maxPrice,
+      } = context;
+
+      let item = await this.itemValidator.generateItem({
+        itemType,
+        rarity,
+        playerLevel,
+        reason,
+      } as ItemGenerationContext);
+
+      if (maxPrice && item.price > maxPrice) {
+        item = this.adjustItemPrice(item, maxPrice);
+      }
+
+      item = this.balanceItemEffects(item, playerLevel);
+
+      const validation = this.itemValidator.validateItem(item);
+      if (!validation.valid) {
+        return {
+          success: false,
+          message: `生成的物品未通过平衡性验证：${validation.errors.join(', ')}`,
+        };
+      }
+
+      if (validation.warnings.length > 0) {
+        console.warn('[EconomyManager] 物品平衡性警告:', validation.warnings.join(', '));
+      }
+
+      return {
+        success: true,
+        message: `成功生成平衡物品：${item.name}`,
+        item,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        message: `生成平衡物品失败：${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * 调整物品价格以符合经济平衡
+   */
+  private adjustItemPrice(item: Item, maxPrice: number): Item {
+    if (item.price <= maxPrice) {
+      return item;
+    }
+
+    const adjustedPrice = Math.floor(maxPrice * 0.9);
+
+    if (item.effects && item.effects.length > 0) {
+      const scale = adjustedPrice / item.price;
+      item.effects = item.effects.map(effect => ({
+        type: effect.type,
+        value: Math.max(1, Math.floor(effect.value * scale)),
+      }));
+    }
+
+    return {
+      ...item,
+      price: adjustedPrice,
+    };
+  }
+
+  /**
+   * 平衡物品效果
+   */
+  private balanceItemEffects(item: Item, playerLevel: number): Item {
+    if (!item.effects || item.effects.length === 0) {
+      return item;
+    }
+
+    const maxEffectValue = playerLevel * 10;
+
+    const balancedEffects = item.effects.map(effect => {
+      let balancedValue = effect.value;
+
+      if (effect.type === 'heal' || effect.type === 'stamina') {
+        balancedValue = Math.min(effect.value, maxEffectValue);
+      } else if (effect.type === 'mood') {
+        balancedValue = Math.min(effect.value, 50);
+      } else if (effect.type === 'mana') {
+        balancedValue = Math.min(effect.value, maxEffectValue);
+      }
+
+      return {
+        type: effect.type,
+        value: balancedValue,
+      };
+    });
+
+    return {
+      ...item,
+      effects: balancedEffects,
+    };
+  }
+
+  /**
+   * 添加物品到商店
+   */
+  addItemToShop(item: Item, shopId?: string): {
+    success: boolean;
+    message: string;
+  } {
+    const validation = this.itemValidator.validateItem(item);
+    if (!validation.valid) {
+      return {
+        success: false,
+        message: `物品验证失败：${validation.errors.join(', ')}`,
+      };
+    }
+
+    if (!item.buyable) {
+      return {
+        success: false,
+        message: '只有可购买的物品才能添加到商店',
+      };
+    }
+
+    this.items.set(item.id, { ...item });
+
+    return {
+      success: true,
+      message: `成功将 ${item.name} 添加到商店`,
+    };
+  }
+
+  /**
+   * 从玩家库存出售物品
+   */
+  sellItem(itemId: string): {
+    success: boolean;
+    message: string;
+    goldEarned?: number;
+  } {
+    const index = this.playerInventory.findIndex(item => item.id === itemId);
+    if (index === -1) {
+      return { success: false, message: '物品不在库存中' };
+    }
+
+    const item = this.playerInventory[index];
+
+    if (!item.sellable) {
+      return { success: false, message: '该物品不可出售' };
+    }
+
+    const sellPrice = Math.floor(item.price * 0.5);
+    this.playerInventory.splice(index, 1);
+    this.playerGold += sellPrice;
+
+    if (this.config.enableTransactionLog) {
+      this.recordTransaction({
+        id: `trans-${Date.now()}`,
+        type: 'sell',
+        amount: sellPrice,
+        itemId,
+        description: `出售 ${item.name}`,
+        timestamp: Date.now(),
+        participants: {
+          from: itemId,
+          to: 'player',
+        },
+      });
+    }
+
+    return {
+      success: true,
+      message: `成功出售 ${item.name}，获得 ${sellPrice} 金币`,
+      goldEarned: sellPrice,
+    };
+  }
+
+  /**
+   * 获取玩家库存物品总价值
+   */
+  getInventoryTotalValue(): number {
+    return this.playerInventory.reduce((total, item) => total + item.price, 0);
+  }
+
+  /**
+   * 检查经济平衡状态
+   */
+  checkEconomyBalance(): {
+    isBalanced: boolean;
+    playerGoldRatio: number;
+    inventoryValue: number;
+    recommendations: string[];
+  } {
+    const maxGold = this.config.maxGold;
+    const playerGoldRatio = this.playerGold / maxGold;
+    const inventoryValue = this.getInventoryTotalValue();
+    const recommendations: string[] = [];
+
+    let isBalanced = true;
+
+    if (playerGoldRatio > 0.8) {
+      isBalanced = false;
+      recommendations.push('玩家金币过多，建议增加高价值商品或消费途径');
+    } else if (playerGoldRatio < 0.1) {
+      isBalanced = false;
+      recommendations.push('玩家金币过少，建议增加金币获取途径');
+    }
+
+    if (inventoryValue > this.playerGold * 2) {
+      recommendations.push('玩家物品价值过高，可能需要平衡物品获取速度');
+    }
+
+    return {
+      isBalanced,
+      playerGoldRatio,
+      inventoryValue,
+      recommendations,
+    };
   }
 }

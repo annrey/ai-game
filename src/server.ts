@@ -6,6 +6,12 @@
 import { loadTestConfig } from './utils/config.js';
 loadTestConfig();
 
+// 调试：打印环境变量
+console.log('🔧 环境变量检查:');
+console.log('  DEFAULT_PROVIDER:', process.env.DEFAULT_PROVIDER);
+console.log('  OLLAMA_HOST:', process.env.OLLAMA_HOST);
+console.log('  OLLAMA_MODEL:', process.env.OLLAMA_MODEL);
+
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -124,7 +130,7 @@ async function initProviderConfig(): Promise<void> {
       }
     }
   } else {
-    providerConfig = ProviderFactory.configFromEnv();
+    providerConfig = await ProviderFactory.configFromEnv();
 
     // 检查配置的 provider 是否可用
     const providerToCheck = providerConfig.defaultProvider;
@@ -1050,6 +1056,317 @@ function getCurrentModelName(): string {
   }
 }
 
+// ============ 思维链 API ============
+
+/**
+ * 获取当前思维链
+ */
+app.get('/api/cot/current', (req, res) => {
+  try {
+    const state = engine.getState();
+    const currentTurn = state.currentTurn;
+    
+    if (!currentTurn || !currentTurn.chainOfThought) {
+      res.json({
+        success: true,
+        data: {
+          current: null,
+          message: '当前没有活跃的思维链',
+        },
+      });
+      return;
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        current: currentTurn.chainOfThought,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * 获取思维链历史
+ * 支持分页（limit, offset）和过滤（按 agentRole）
+ */
+app.get('/api/cot/history', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || LIMITS.SAVES_LIST_DEFAULT;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const agentRole = req.query.agentRole as string | undefined;
+    
+    const state = engine.getState();
+    const history = state.history || [];
+    
+    const allChainsOfThought = history
+      .filter(turn => turn.chainOfThought)
+      .map(turn => turn.chainOfThought);
+    
+    let filtered = allChainsOfThought;
+    if (agentRole) {
+      filtered = filtered.filter(cot => cot.agentRole === agentRole);
+    }
+    
+    const total = filtered.length;
+    const paginated = filtered.slice(offset, offset + limit);
+    
+    res.json({
+      success: true,
+      data: {
+        items: paginated,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * 展开指定思维链步骤
+ */
+app.post('/api/cot/expand', (req, res) => {
+  try {
+    const { stepId, cotId } = req.body as { stepId?: string; cotId?: string };
+    
+    if (!stepId) {
+      res.status(400).json({ 
+        success: false, 
+        error: 'stepId is required' 
+      });
+      return;
+    }
+    
+    const state = engine.getState();
+    const history = state.history || [];
+    
+    let targetCot: any = null;
+    
+    if (cotId) {
+      for (const turn of history) {
+        if (turn.chainOfThought && turn.chainOfThought.id === cotId) {
+          targetCot = turn.chainOfThought;
+          break;
+        }
+      }
+    }
+    
+    if (!targetCot) {
+      const currentTurn = state.currentTurn;
+      if (currentTurn && currentTurn.chainOfThought) {
+        targetCot = currentTurn.chainOfThought;
+      }
+    }
+    
+    if (!targetCot) {
+      res.status(404).json({ 
+        success: false, 
+        error: '未找到指定的思维链' 
+      });
+      return;
+    }
+    
+    const targetStep = targetCot.steps.find(step => 
+      step.step === stepId || step.title.includes(stepId)
+    );
+    
+    if (!targetStep) {
+      res.status(404).json({ 
+        success: false, 
+        error: '未找到指定的思维步骤' 
+      });
+      return;
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        step: {
+          id: stepId,
+          ...targetStep,
+          expanded: true,
+          relatedSteps: targetCot.steps.filter(s => s.step !== targetStep.step).map(s => ({
+            step: s.step,
+            title: s.title,
+            summary: s.content.substring(0, 100) + (s.content.length > 100 ? '...' : ''),
+          })),
+        },
+        chainOfThought: {
+          id: targetCot.id,
+          agentRole: targetCot.agentRole,
+          timestamp: targetCot.timestamp,
+          totalSteps: targetCot.steps.length,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * 获取思维链统计信息
+ */
+app.get('/api/cot/stats', (req, res) => {
+  try {
+    const state = engine.getState();
+    const history = state.history || [];
+    
+    const allChainsOfThought = history
+      .filter(turn => turn.chainOfThought)
+      .map(turn => turn.chainOfThought);
+    
+    const statsByAgent: Record<string, {
+      count: number;
+      totalDuration: number;
+      avgDuration: number;
+      totalSteps: number;
+    }> = {};
+    
+    let overallTotalDuration = 0;
+    let overallTotalSteps = 0;
+    
+    for (const cot of allChainsOfThought) {
+      const agentRole = cot.agentRole;
+      if (!statsByAgent[agentRole]) {
+        statsByAgent[agentRole] = {
+          count: 0,
+          totalDuration: 0,
+          avgDuration: 0,
+          totalSteps: 0,
+        };
+      }
+      
+      const cotDuration = cot.steps.reduce((sum, step) => sum + (step.duration || 0), 0);
+      
+      statsByAgent[agentRole].count++;
+      statsByAgent[agentRole].totalDuration += cotDuration;
+      statsByAgent[agentRole].totalSteps += cot.steps.length;
+      
+      overallTotalDuration += cotDuration;
+      overallTotalSteps += cot.steps.length;
+    }
+    
+    for (const agentRole of Object.keys(statsByAgent)) {
+      const stats = statsByAgent[agentRole];
+      stats.avgDuration = stats.count > 0 
+        ? Math.floor(stats.totalDuration / stats.count) 
+        : 0;
+    }
+    
+    const totalCots = allChainsOfThought.length;
+    const avgThinkingTime = totalCots > 0 
+      ? Math.floor(overallTotalDuration / totalCots) 
+      : 0;
+    
+    const avgStepsPerCot = totalCots > 0 
+      ? (overallTotalSteps / totalCots).toFixed(2) 
+      : '0';
+    
+    const qualityMetrics = {
+      highQualityCount: allChainsOfThought.filter(cot => cot.steps.length >= 4).length,
+      mediumQualityCount: allChainsOfThought.filter(cot => cot.steps.length >= 2 && cot.steps.length < 4).length,
+      lowQualityCount: allChainsOfThought.filter(cot => cot.steps.length < 2).length,
+      qualityScore: totalCots > 0 
+        ? ((allChainsOfThought.filter(cot => cot.steps.length >= 4).length / totalCots) * 100).toFixed(1)
+        : '0',
+    };
+    
+    res.json({
+      success: true,
+      data: {
+        summary: {
+          totalChainsOfThought: totalCots,
+          avgThinkingTime,
+          avgStepsPerCot: parseFloat(avgStepsPerCot as string),
+        },
+        byAgent: statsByAgent,
+        qualityMetrics,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * 思维链事件流（Server-Sent Events）
+ * 实时推送思维链更新
+ */
+app.get('/api/cot/events', (req, res) => {
+  try {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    
+    let lastCOTId: string | null = null;
+    
+    // 定时发送思维链更新
+    const interval = setInterval(() => {
+      try {
+        const state = engine.getState();
+        const currentTurn = state.currentTurn;
+        
+        if (currentTurn && currentTurn.chainOfThought) {
+          const cot = currentTurn.chainOfThought;
+          
+          // 只有当思维链 ID 变化时才发送
+          if (cot.id !== lastCOTId) {
+            lastCOTId = cot.id;
+            
+            res.write(`event: cot-update\ndata: ${JSON.stringify({
+              type: 'cot-update',
+              data: cot,
+              timestamp: Date.now(),
+            })}\n\n`);
+          }
+        }
+      } catch (err) {
+        console.error('[COT Events] Error:', err);
+      }
+    }, 1000); // 每秒检查一次
+    
+    // 客户端断开时清理
+    req.on('close', () => {
+      clearInterval(interval);
+      console.log('[COT Events] Client disconnected');
+    });
+    
+    // 发送初始连接确认
+    res.write(`event: connected\ndata: ${JSON.stringify({
+      type: 'connected',
+      message: '思维链事件流已连接',
+      timestamp: Date.now(),
+    })}\n\n`);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 /**
  * 打印启动配置信息
  */
@@ -1118,6 +1435,13 @@ function printStartupInfo(): void {
   GET  /api/turn-count    获取回合数
   GET  /api/memories      获取记忆列表
   GET  /api/memories/search?q=关键词  搜索记忆
+  
+🧠 思维链 API:
+  GET  /api/cot/current         获取当前思维链
+  GET  /api/cot/history         获取思维链历史（支持分页和过滤）
+  POST /api/cot/expand          展开指定思维链步骤
+  GET  /api/cot/stats           获取思维链统计信息
+  GET  /api/cot/events          思维链事件流（SSE 实时推送）
   `);
 }
 

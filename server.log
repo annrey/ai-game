@@ -1,0 +1,7 @@
+
+> ai-storyteller-engine@0.1.0 server
+> tsx src/server.ts
+
+📄 检测到测试环境配置，加载 .env.test.local
+🔍 检查配置的 Provider: undefined
+[ProviderFactory] 当前使用的 Provider: undefined

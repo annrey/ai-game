@@ -820,6 +820,193 @@
       border-color: rgba(92, 171, 124, 0.45);
     }
 
+    /* 思维链面板 */
+    .cot-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 4px 0;
+    }
+
+    .cot-step {
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid;
+      background: rgba(255, 255, 255, 0.8);
+      animation: cotSlideIn 0.3s ease-out;
+      position: relative;
+      overflow: hidden;
+    }
+
+    @keyframes cotSlideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .cot-step.observation {
+      border-color: rgba(59, 130, 246, 0.3);
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(255, 255, 255, 0.8));
+    }
+
+    .cot-step.analysis {
+      border-color: rgba(245, 158, 11, 0.3);
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(255, 255, 255, 0.8));
+    }
+
+    .cot-step.reasoning {
+      border-color: rgba(139, 92, 246, 0.3);
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(255, 255, 255, 0.8));
+    }
+
+    .cot-step.decision {
+      border-color: rgba(239, 68, 68, 0.3);
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(255, 255, 255, 0.8));
+    }
+
+    .cot-step.action {
+      border-color: rgba(16, 185, 129, 0.3);
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.8));
+    }
+
+    .cot-step-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+
+    .cot-step-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .cot-step-title.observation { color: #2563eb; }
+    .cot-step-title.analysis { color: #d97706; }
+    .cot-step-title.reasoning { color: #7c3aed; }
+    .cot-step-title.decision { color: #dc2626; }
+    .cot-step-title.action { color: #059669; }
+
+    .cot-step-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .cot-step-title.observation .cot-step-icon { background: rgba(59, 130, 246, 0.15); }
+    .cot-step-title.analysis .cot-step-icon { background: rgba(245, 158, 11, 0.15); }
+    .cot-step-title.reasoning .cot-step-icon { background: rgba(139, 92, 246, 0.15); }
+    .cot-step-title.decision .cot-step-icon { background: rgba(239, 68, 68, 0.15); }
+    .cot-step-title.action .cot-step-icon { background: rgba(16, 185, 129, 0.15); }
+
+    .cot-step-agent {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 9px;
+      font-family: 'Space Mono', monospace;
+      background: rgba(156, 163, 175, 0.1);
+      color: #6b7280;
+      margin-left: auto;
+    }
+
+    .cot-step-agent svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    .cot-step-timestamp {
+      font-size: 9px;
+      color: #9ca3af;
+      font-family: 'Space Mono', monospace;
+      flex-shrink: 0;
+    }
+
+    .cot-step-content {
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--jade-900);
+      padding-left: 4px;
+    }
+
+    .cot-step-content p {
+      margin-bottom: 6px;
+    }
+
+    .cot-step-content p:last-child {
+      margin-bottom: 0;
+    }
+
+    .cot-step-content strong {
+      color: var(--jade-800);
+      font-weight: 600;
+    }
+
+    .cot-step-content em {
+      color: var(--jade-700);
+      font-style: italic;
+    }
+
+    .cot-step-content code {
+      background: rgba(156, 163, 175, 0.1);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--jade-800);
+    }
+
+    .cot-step-content ul,
+    .cot-step-content ol {
+      margin: 6px 0;
+      padding-left: 20px;
+    }
+
+    .cot-step-content li {
+      margin-bottom: 4px;
+    }
+
+    .cot-step-content blockquote {
+      border-left: 2px solid rgba(92, 171, 124, 0.3);
+      padding-left: 10px;
+      margin: 6px 0;
+      color: var(--jade-700);
+      font-style: italic;
+    }
+
+    .cot-step-highlight {
+      background: rgba(255, 215, 0, 0.15);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .cot-empty {
+      text-align: center;
+      padding: 20px;
+      color: var(--jade-600);
+      font-size: 12px;
+    }
+
     /* 世界状态 */
     .world-stats {
       display: grid;
@@ -1634,6 +1821,10 @@
           <div class="setting-control"><input type="checkbox" id="stShowReasoning"></div>
         </div>
         <div class="setting-item">
+          <div class="setting-label"><strong>思维链</strong><span>显示 AI 思考过程</span></div>
+          <div class="setting-control"><input type="checkbox" id="stShowCOT"></div>
+        </div>
+        <div class="setting-item">
           <div class="setting-label"><strong>世界状态</strong><span>显示/隐藏</span></div>
           <div class="setting-control"><input type="checkbox" id="stShowWorld"></div>
         </div>
@@ -2377,6 +2568,19 @@
 
     <!-- 右侧面板 -->
     <aside class="right-panel" id="rightPanel" aria-label="右侧状态面板">
+      <details class="panel-section" data-panel="chain-of-thought" open>
+        <summary class="panel-summary-row focus-ring">
+          <span class="panel-title">🧠 思维链</span>
+          <span class="panel-brief" id="summaryCOT"></span>
+          <span class="panel-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="panel-content">
+          <div class="cot-container" id="cotContainer">
+            <!-- 思维链步骤将动态添加到这里 -->
+          </div>
+        </div>
+      </details>
+
       <details class="panel-section" data-panel="reasoning" open>
         <summary class="panel-summary-row focus-ring">
           <span class="panel-title">推演日志</span>
@@ -2842,6 +3046,7 @@
       showSceneMeta: true,
       showCouncil: true,
       showReasoning: true,
+      showCOT: true,
       showWorld: true,
       showCharacter: true,
       showInventory: true,
@@ -2851,6 +3056,7 @@
       idleTimeout: 30,
       panelOpen: {
         reasoning: true,
+        cot: true,
         world: true,
         character: true,
         inventory: true,
@@ -2934,6 +3140,10 @@
       if (lg) {
         lg.textContent = logHistory.length ? `共 ${logHistory.length} 条 · 预览 ${uiSettings.logPreview} 条` : '';
       }
+
+      // 更新思维链摘要
+      const cot = getCOT();
+      updateCOTSummary(cot);
     }
 
     function applySettings(s) {
@@ -2958,6 +3168,7 @@
       renderLogPreview(Number(s.logPreview) || defaultSettings.logPreview);
 
       const panels = {
+        cot: document.querySelector('[data-panel="chain-of-thought"]'),
         reasoning: document.querySelector('[data-panel="reasoning"]'),
         world: document.querySelector('[data-panel="world"]'),
         character: document.querySelector('[data-panel="character"]'),
@@ -2968,6 +3179,7 @@
         log: document.querySelector('[data-panel="log"]'),
       };
 
+      if (panels.cot) panels.cot.hidden = !s.showCOT;
       if (panels.reasoning) panels.reasoning.hidden = !s.showReasoning;
       if (panels.world) panels.world.hidden = !s.showWorld;
       if (panels.character) panels.character.hidden = !s.showCharacter;
@@ -2975,6 +3187,7 @@
       if (panels.quests) panels.quests.hidden = !s.showQuests;
       if (panels.log) panels.log.hidden = !s.showLog;
 
+      if (panels.cot && s.panelOpen?.cot !== undefined) panels.cot.open = !!s.panelOpen.cot;
       if (panels.reasoning && s.panelOpen?.reasoning !== undefined) panels.reasoning.open = !!s.panelOpen.reasoning;
       if (panels.world && s.panelOpen?.world !== undefined) panels.world.open = !!s.panelOpen.world;
       if (panels.character && s.panelOpen?.character !== undefined) panels.character.open = !!s.panelOpen.character;
@@ -3019,6 +3232,447 @@
       saveSettings(uiSettings);
       applySettings(uiSettings);
     }
+
+    // ========== 思维链 (Chain of Thought) 相关函数 ==========
+    
+    // 思维链轮询定时器
+    let cotPollingInterval = null;
+    let lastCOTId = null;
+    let cotEventSource = null;
+
+    // 从 API 获取当前思维链
+    async function getCOTFromAPI() {
+      try {
+        const res = await fetch(`${API_BASE}/api/cot/current`);
+        if (!res.ok) return null;
+        
+        const data = await res.json();
+        if (data.success && data.data.current) {
+          return data.data.current;
+        }
+        return null;
+      } catch (err) {
+        console.error('Failed to fetch COT from API:', err);
+        return null;
+      }
+    }
+
+    // 从 API 获取思维链历史
+    async function getCOTHistory(limit = 20, offset = 0, agentRole) {
+      try {
+        const params = new URLSearchParams({
+          limit: String(limit),
+          offset: String(offset),
+        });
+        if (agentRole) params.append('agentRole', agentRole);
+        
+        const res = await fetch(`${API_BASE}/api/cot/history?${params}`);
+        if (!res.ok) return null;
+        
+        const data = await res.json();
+        if (data.success) {
+          return data.data;
+        }
+        return null;
+      } catch (err) {
+        console.error('Failed to fetch COT history:', err);
+        return null;
+      }
+    }
+
+    // 渲染思维链对象（来自 API）
+    function renderCOTFromAPI(cot) {
+      if (!cot) return;
+      
+      // 检查是否需要更新（通过 ID 判断）
+      if (cot.id === lastCOTId) {
+        return; // 没有变化，跳过
+      }
+      lastCOTId = cot.id;
+      
+      // 清空本地存储的思维链
+      const container = document.getElementById('cotContainer');
+      if (!container) return;
+      
+      container.innerHTML = '';
+      
+      if (!cot.steps || cot.steps.length === 0) {
+        container.innerHTML = '<div class="cot-empty">暂无思维链记录</div>';
+        return;
+      }
+      
+      // 渲染所有步骤
+      cot.steps.forEach((step, index) => {
+        const stepData = {
+          type: step.step,
+          content: step.content,
+          agent: cot.agentRole,
+          timestamp: cot.timestamp,
+        };
+        const stepEl = renderCOTStep(stepData, index);
+        container.appendChild(stepEl);
+      });
+      
+      // 滚动到底部
+      container.scrollTop = container.scrollHeight;
+      
+      // 更新摘要
+      updateCOTSummaryFromAPI(cot);
+    }
+
+    // 更新思维链摘要（API 版本）
+    function updateCOTSummaryFromAPI(cot) {
+      const summary = document.getElementById('summaryCOT');
+      if (!summary || !cot) return;
+      
+      if (!cot.steps || cot.steps.length === 0) {
+        summary.textContent = '';
+        return;
+      }
+      
+      const stepCounts = {};
+      cot.steps.forEach(step => {
+        const type = step.step || 'unknown';
+        stepCounts[type] = (stepCounts[type] || 0) + 1;
+      });
+      
+      const parts = [];
+      const typeLabels = {
+        observation: '观察',
+        analysis: '分析',
+        reasoning: '推理',
+        decision: '决策',
+        action: '行动'
+      };
+      
+      Object.entries(stepCounts).forEach(([type, count]) => {
+        const label = typeLabels[type] || type;
+        parts.push(`${label} ${count}`);
+      });
+      
+      summary.textContent = parts.join(' · ') || `${cot.steps.length} 条记录`;
+    }
+
+    // 启动思维链轮询
+    function startCOTPolling(intervalMs = 1000) {
+      // 优先使用 SSE 事件流
+      if (window.EventSource) {
+        try {
+          cotEventSource = new EventSource(`${API_BASE}/api/cot/events`);
+          
+          cotEventSource.addEventListener('cot-update', (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.data) {
+                renderCOTFromAPI(data.data);
+              }
+            } catch (err) {
+              console.error('Failed to parse COT event:', err);
+            }
+          });
+          
+          cotEventSource.addEventListener('connected', (event) => {
+            console.log('[COT Events] Connected:', JSON.parse(event.data).message);
+          });
+          
+          cotEventSource.onerror = (err) => {
+            console.error('[COT Events] Error:', err);
+            // SSE 连接失败时降级到轮询
+            stopCOTPolling();
+            startPollingFallback(intervalMs);
+          };
+          
+          console.log('[COT Events] Using SSE for real-time updates');
+        } catch (err) {
+          console.error('Failed to initialize SSE, falling back to polling:', err);
+          startPollingFallback(intervalMs);
+        }
+      } else {
+        // 不支持 EventSource 时使用轮询
+        startPollingFallback(intervalMs);
+      }
+    }
+
+    // 轮询降级方案
+    function startPollingFallback(intervalMs) {
+      if (cotPollingInterval) {
+        clearInterval(cotPollingInterval);
+      }
+      
+      cotPollingInterval = setInterval(async () => {
+        const cot = await getCOTFromAPI();
+        if (cot) {
+          renderCOTFromAPI(cot);
+        }
+      }, intervalMs);
+      
+      console.log('[COT Polling] Using polling for updates');
+    }
+
+    // 停止思维链轮询
+    function stopCOTPolling() {
+      if (cotPollingInterval) {
+        clearInterval(cotPollingInterval);
+        cotPollingInterval = null;
+      }
+      if (cotEventSource) {
+        cotEventSource.close();
+        cotEventSource = null;
+      }
+      lastCOTId = null;
+    }
+
+    // 获取当前思维链
+    function getCOT() {
+      try {
+        const raw = localStorage.getItem('chainOfThought');
+        if (raw) return JSON.parse(raw);
+      } catch (err) {
+        console.error('Failed to load chain of thought:', err);
+      }
+      return [];
+    }
+
+    // 保存思维链
+    function saveCOT(cot) {
+      try {
+        localStorage.setItem('chainOfThought', JSON.stringify(cot));
+      } catch (err) {
+        console.error('Failed to save chain of thought:', err);
+      }
+    }
+
+    // 格式化时间戳
+    function formatCOTTimestamp(date) {
+      const now = new Date();
+      const diff = now - date;
+      
+      if (diff < 1000) return '刚刚';
+      if (diff < 60000) return `${Math.floor(diff / 1000)}秒前`;
+      if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+      if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+      
+      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // 获取步骤类型的图标和标签
+    function getCOTStepTypeConfig(type) {
+      const config = {
+        observation: { icon: '👁️', label: '观察' },
+        analysis: { icon: '🔍', label: '分析' },
+        reasoning: { icon: '🧠', label: '推理' },
+        decision: { icon: '⚖️', label: '决策' },
+        action: { icon: '⚡', label: '行动' }
+      };
+      return config[type] || { icon: '💭', label: '思考' };
+    }
+
+    // 渲染单个思维链步骤
+    function renderCOTStep(step, index) {
+      const typeConfig = getCOTStepTypeConfig(step.type);
+      const timestamp = step.timestamp ? formatCOTTimestamp(new Date(step.timestamp)) : '';
+      const agentName = step.agent || 'AI';
+      
+      const stepEl = document.createElement('div');
+      stepEl.className = `cot-step ${step.type}`;
+      stepEl.setAttribute('data-cot-index', index);
+      
+      stepEl.innerHTML = `
+        <div class="cot-step-header">
+          <div class="cot-step-title ${step.type}">
+            <span class="cot-step-icon">${typeConfig.icon}</span>
+            <span>${typeConfig.label}</span>
+          </div>
+          <span class="cot-step-agent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2a3 3 0 0 1 3 3v1a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+              <circle cx="12" cy="13" r="8"/>
+            </svg>
+            ${agentName}
+          </span>
+          <span class="cot-step-timestamp">${timestamp}</span>
+        </div>
+        <div class="cot-step-content">${step.content || ''}</div>
+      `;
+      
+      return stepEl;
+    }
+
+    // 渲染思维链
+    function renderChainOfThought(cot) {
+      const container = document.getElementById('cotContainer');
+      if (!container) return;
+      
+      container.innerHTML = '';
+      
+      if (!cot || cot.length === 0) {
+        container.innerHTML = '<div class="cot-empty">暂无思维链记录</div>';
+        return;
+      }
+      
+      // 渲染所有步骤（最新的在底部）
+      cot.forEach((step, index) => {
+        const stepEl = renderCOTStep(step, index);
+        container.appendChild(stepEl);
+      });
+      
+      // 滚动到底部以显示最新的思维步骤
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // 更新思维链 UI
+    function updateCOTUI(cot) {
+      if (!cot) {
+        cot = getCOT();
+      }
+      
+      renderChainOfThought(cot);
+      updateCOTSummary(cot);
+    }
+
+    // 更新思维链摘要
+    function updateCOTSummary(cot) {
+      const summary = document.getElementById('summaryCOT');
+      if (!summary) return;
+      
+      if (!cot || cot.length === 0) {
+        summary.textContent = '';
+        return;
+      }
+      
+      const stepCounts = {};
+      cot.forEach(step => {
+        const type = step.type || 'unknown';
+        stepCounts[type] = (stepCounts[type] || 0) + 1;
+      });
+      
+      const parts = [];
+      const typeLabels = {
+        observation: '观察',
+        analysis: '分析',
+        reasoning: '推理',
+        decision: '决策',
+        action: '行动'
+      };
+      
+      Object.entries(stepCounts).forEach(([type, count]) => {
+        const label = typeLabels[type] || type;
+        parts.push(`${label} ${count}`);
+      });
+      
+      summary.textContent = parts.join(' · ') || `${cot.length} 条记录`;
+    }
+
+    // 添加新的思维链步骤
+    function addCOTStep(type, content, agent = 'AI') {
+      const cot = getCOT();
+      const newStep = {
+        type,
+        content,
+        agent,
+        timestamp: new Date().toISOString()
+      };
+      cot.push(newStep);
+      
+      // 限制历史记录数量
+      const maxSteps = 50;
+      if (cot.length > maxSteps) {
+        cot.splice(0, cot.length - maxSteps);
+      }
+      
+      saveCOT(cot);
+      updateCOTUI(cot);
+    }
+
+    // 清除思维链历史
+    function clearCOT() {
+      saveCOT([]);
+      updateCOTUI([]);
+    }
+
+    // 导出思维链为 JSON
+    async function exportCOTAsJSON() {
+      try {
+        const data = await getCOTHistory(100, 0);
+        if (!data || !data.items || data.items.length === 0) {
+          addNarrative('⚠️ 没有可导出的思维链数据', false);
+          return;
+        }
+        
+        const jsonStr = JSON.stringify(data.items, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chain-of-thought-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        addNarrative(`✅ 已导出 ${data.items.length} 条思维链记录`, false);
+      } catch (err) {
+        console.error('Failed to export COT:', err);
+        addNarrative('⚠️ 导出失败', false);
+      }
+    }
+
+    // 导出思维链为文本
+    async function exportCOTAsText() {
+      try {
+        const data = await getCOTHistory(100, 0);
+        if (!data || !data.items || data.items.length === 0) {
+          addNarrative('⚠️ 没有可导出的思维链数据', false);
+          return;
+        }
+        
+        const textLines = [];
+        textLines.push('思维链导出');
+        textLines.push('============');
+        textLines.push(`导出时间：${new Date().toLocaleString('zh-CN')}`);
+        textLines.push(`共 ${data.items.length} 条记录\n`);
+        
+        data.items.forEach((cot, index) => {
+          textLines.push(`\n[记录 ${index + 1}]`);
+          textLines.push(`代理：${cot.agentRole}`);
+          textLines.push(`时间：${new Date(cot.timestamp).toLocaleString('zh-CN')}`);
+          textLines.push(`步骤数：${cot.steps.length}\n`);
+          
+          cot.steps.forEach((step, stepIndex) => {
+            const stepTypeMap = {
+              observation: '观察',
+              analysis: '分析',
+              reasoning: '推理',
+              decision: '决策',
+              action: '行动'
+            };
+            const stepLabel = stepTypeMap[step.step] || step.step;
+            textLines.push(`  ${stepIndex + 1}. [${stepLabel}]`);
+            textLines.push(`     ${step.content.replace(/\n/g, '\n     ')}`);
+            textLines.push('');
+          });
+          
+          textLines.push('---');
+        });
+        
+        const blob = new Blob([textLines.join('\n')], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chain-of-thought-${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        addNarrative(`✅ 已导出 ${data.items.length} 条思维链记录为文本`, false);
+      } catch (err) {
+        console.error('Failed to export COT:', err);
+        addNarrative('⚠️ 导出失败', false);
+      }
+    }
+
+    // ========== 思维链函数结束 ==========
 
     // 加载游戏状态
     async function loadGameState() {
@@ -3456,6 +4110,7 @@
       const stShowSceneMeta = document.getElementById('stShowSceneMeta');
       const stShowCouncil = document.getElementById('stShowCouncil');
       const stShowReasoning = document.getElementById('stShowReasoning');
+      const stShowCOT = document.getElementById('stShowCOT');
       const stAutoWorldTick = document.getElementById('stAutoWorldTick');
       const stIdleTimeout = document.getElementById('stIdleTimeout');
 
@@ -3470,6 +4125,7 @@
       if (stShowSceneMeta) stShowSceneMeta.checked = !!uiSettings.showSceneMeta;
       if (stShowCouncil) stShowCouncil.checked = !!uiSettings.showCouncil;
       if (stShowReasoning) stShowReasoning.checked = !!uiSettings.showReasoning;
+      if (stShowCOT) stShowCOT.checked = !!uiSettings.showCOT;
       if (stShowWorld) stShowWorld.checked = !!uiSettings.showWorld;
       if (stShowCharacter) stShowCharacter.checked = !!uiSettings.showCharacter;
       if (stShowInventory) stShowInventory.checked = !!uiSettings.showInventory;
@@ -4190,6 +4846,10 @@
                 const payload = JSON.parse(line);
                 if (payload.type === 'agent') {
                   addReasoningLog(payload.role, payload.content);
+                  // 同步获取思维链
+                  getCOTFromAPI().then(cot => {
+                    if (cot) renderCOTFromAPI(cot);
+                  });
                 } else if (payload.type === 'chunk') {
                   full += payload.content;
                   p.innerHTML = escapeHtml(full).replace(/\n/g, '<br>');
@@ -4233,6 +4893,12 @@
 
           if (r.data?.agentDetails) {
             r.data.agentDetails.forEach(ad => addReasoningLog(ad.from, ad.content));
+          }
+
+          // 同步获取思维链
+          const cot = await getCOTFromAPI();
+          if (cot) {
+            renderCOTFromAPI(cot);
           }
 
           if (r.data?.narrative) {
@@ -4554,6 +5220,7 @@
     if (stShowSceneMeta) stShowSceneMeta.addEventListener('change', () => updateSettings({ showSceneMeta: stShowSceneMeta.checked }));
     if (stShowCouncil) stShowCouncil.addEventListener('change', () => updateSettings({ showCouncil: stShowCouncil.checked }));
     if (stShowReasoning) stShowReasoning.addEventListener('change', () => updateSettings({ showReasoning: stShowReasoning.checked }));
+    if (stShowCOT) stShowCOT.addEventListener('change', () => updateSettings({ showCOT: stShowCOT.checked }));
     if (stShowWorld) stShowWorld.addEventListener('change', () => updateSettings({ showWorld: stShowWorld.checked }));
     if (stShowCharacter) stShowCharacter.addEventListener('change', () => updateSettings({ showCharacter: stShowCharacter.checked }));
     if (stShowInventory) stShowInventory.addEventListener('change', () => updateSettings({ showInventory: stShowInventory.checked }));
@@ -4995,6 +5662,12 @@
 
     applySettings(uiSettings);
     syncSettingsControls();
+
+    // 初始化思维链 UI
+    updateCOTUI();
+    
+    // 启动思维链轮询（每 1 秒检查一次）
+    startCOTPolling(1000);
 
     const backdrop = document.getElementById('drawerBackdrop');
     const openSidebarBtn = document.getElementById('openSidebar');

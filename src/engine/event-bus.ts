@@ -34,6 +34,17 @@ export const GameEvents = {
   PLAYER_SPEAK: 'player:speak',
   PLAYER_MOVE: 'player:move',
 
+  // 物品事件
+  ITEM_CREATED: 'item:created',
+  ITEM_DISCOVERED: 'item:discovered',
+  ITEM_REWARD: 'item:reward',
+  ITEM_GIFT: 'item:gift',
+  ITEM_USED: 'item:used',
+  ITEM_REMOVED: 'item:removed',
+
+  // 成就事件
+  ACHIEVEMENT_UNLOCKED: 'achievement:unlocked',
+
   // 系统事件
   GAME_START: 'game:start',
   GAME_SAVE: 'game:save',
