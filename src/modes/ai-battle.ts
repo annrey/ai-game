@@ -12,11 +12,21 @@ import type { AIProvider } from '../types/provider.js';
 
 const MODE_CONFIG: GameConfig = {
   mode: 'ai-battle',
-  language: 'zh-CN',
+  theme: 'strategy',
+  enableCombat: true,
+  enableSave: true,
+  maxTurns: 1000,
+  difficulty: 'normal',
+  memoryMaxContextChars: 2000,
+  autoWorldTick: false,
+  idleTimeout: 300000,
   enabledAgents: ['narrator', 'rule-arbiter'],
-  streaming: false,
-  logging: true,
   maxHistoryTurns: 50,
+  logging: {
+    enabled: true,
+    level: 'info',
+  },
+  autoSaveInterval: 300000,
 };
 
 /**

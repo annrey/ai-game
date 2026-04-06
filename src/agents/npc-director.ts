@@ -6,7 +6,61 @@
 import { BaseAgent } from './base-agent.js';
 import type { AIProvider } from '../types/provider.js';
 import type { AgentConfig, AgentRequest } from '../types/agent.js';
-import type { NPCState } from '../types/scene.js';
+import type { NPCState, GameTime } from '../types/scene.js';
+import { MemoryManager } from '../memory/memory-manager.js';
+import type { MemoryType } from '../memory/types.js';
+import { ScheduleManager } from '../engine/schedule-manager.js';
+import { TAVERN_NPC_SCHEDULES } from '../types/schedule.js';
+import { RelationshipManager } from '../engine/relationship-manager.js';
+import { TAVERN_NPC_RELATIONSHIPS } from '../types/relationship.js';
+
+interface NPCActivity {
+  description: string;
+  timePhases: Array<GameTime['period']>;
+}
+
+interface NPCMood {
+  mood: string;
+  emoji: string;
+  description: string;
+}
+
+// 酒馆 NPC 活动模板
+const TAVERN_NPC_ACTIVITIES: Record<string, NPCActivity[]> = {
+  'default': [
+    { description: '独自饮酒，若有所思', timePhases: ['evening', 'night', 'midnight'] },
+    { description: '擦拭酒杯', timePhases: ['morning', 'noon', 'afternoon', 'evening'] },
+    { description: '与其他客人闲聊', timePhases: ['noon', 'afternoon', 'evening'] },
+    { description: '望着窗外发呆', timePhases: ['dawn', 'morning', 'night'] },
+  ],
+  'bard': [
+    { description: '弹奏鲁特琴', timePhases: ['evening', 'night'] },
+    { description: '哼唱小曲', timePhases: ['morning', 'afternoon'] },
+    { description: '整理乐谱', timePhases: ['dawn', 'morning'] },
+  ],
+  'barkeep': [
+    { description: '擦拭酒杯', timePhases: ['morning', 'noon', 'afternoon', 'evening'] },
+    { description: '整理酒架', timePhases: ['morning', 'dawn'] },
+    { description: '与客人交谈', timePhases: ['noon', 'afternoon', 'evening'] },
+  ],
+};
+
+// NPC 心情模板
+const NPC_MOODS: NPCMood[] = [
+  { mood: 'happy', emoji: '😊', description: '开心' },
+  { mood: 'calm', emoji: '😐', description: '平静' },
+  { mood: 'curious', emoji: '🤔', description: '好奇' },
+  { mood: 'friendly', emoji: '🙂', description: '友善' },
+  { mood: 'tired', emoji: '😴', description: '疲惫' },
+  { mood: 'angry', emoji: '😠', description: '生气' },
+];
+
+// NPC 状态存储
+interface NPCInternalState {
+  activity: string;
+  mood: string;
+  lastInteractionTime: number;
+};
 
 interface NPCProfile {
   id: string;
@@ -48,9 +102,21 @@ const DEFAULT_CONFIG: AgentConfig = {
 export class NPCDirector extends BaseAgent {
   private npcProfiles = new Map<string, NPCProfile>();
   private relationshipWeb: string = '';
+  private npcStates = new Map<string, NPCInternalState>();
+  private currentTime: GameTime | null = null;
+  private npcMemoryManagers = new Map<string, MemoryManager>();
+  private currentTurn = 0;
+  private scheduleManager: ScheduleManager;
+  private relationshipManager: RelationshipManager;
 
   constructor(provider: AIProvider, model?: string, configOverride?: Partial<AgentConfig>) {
     super({ ...DEFAULT_CONFIG, ...configOverride }, provider, model);
+    this.scheduleManager = new ScheduleManager();
+    this.relationshipManager = new RelationshipManager();
+    // 加载预定义的日程模板
+    this.scheduleManager.loadScheduleTemplates(TAVERN_NPC_SCHEDULES);
+    // 加载预定义的关系
+    this.relationshipManager.loadPredefinedRelationships(TAVERN_NPC_RELATIONSHIPS);
   }
 
   /** 注册NPC档案 */
@@ -87,6 +153,180 @@ export class NPCDirector extends BaseAgent {
     return response.content;
   }
 
+  /** 设置当前游戏时间 */
+  setCurrentTime(time: GameTime): void {
+    this.currentTime = time;
+  }
+
+  /** 初始化 NPC 状态 */
+  initializeNPCState(npcId: string, npcType: string = 'default'): void {
+    const profile = this.npcProfiles.get(npcId);
+    if (!profile) return;
+
+    // 根据时间选择合适的活动
+    const activity = this.selectActivityForTime(npcType);
+    // 默认心情为平静
+    const defaultMood = NPC_MOODS.find(m => m.mood === 'calm')!;
+
+    this.npcStates.set(npcId, {
+      activity,
+      mood: defaultMood.mood,
+      lastInteractionTime: Date.now(),
+    });
+  }
+
+  /** 根据时间选择合适的活动 */
+  private selectActivityForTime(npcType: string = 'default'): string {
+    if (!this.currentTime) {
+      return '观察周围环境';
+    }
+
+    const activities = TAVERN_NPC_ACTIVITIES[npcType] || TAVERN_NPC_ACTIVITIES['default'];
+    const suitableActivities = activities.filter(a => 
+      a.timePhases.includes(this.currentTime!.period)
+    );
+
+    if (suitableActivities.length === 0) {
+      return activities[0].description;
+    }
+
+    // 随机选择一个合适的活动
+    return suitableActivities[Math.floor(Math.random() * suitableActivities.length)].description;
+  }
+
+  /** 获取 NPC 状态 */
+  getNPCState(npcId: string): { activity: string; mood: string; emoji: string } | null {
+    const state = this.npcStates.get(npcId);
+    if (!state) return null;
+
+    const moodInfo = NPC_MOODS.find(m => m.mood === state.mood) || NPC_MOODS[1];
+    return {
+      activity: state.activity,
+      mood: state.mood,
+      emoji: moodInfo.emoji,
+    };
+  }
+
+  /** 更新 NPC 活动 */
+  updateNPCActivity(npcId: string, activity?: string): void {
+    const state = this.npcStates.get(npcId);
+    if (!state) return;
+
+    const profile = this.npcProfiles.get(npcId);
+    const npcType = profile?.id.includes('bard') ? 'bard' : 
+                     profile?.id.includes('barkeep') ? 'barkeep' : 'default';
+
+    state.activity = activity || this.selectActivityForTime(npcType);
+    state.lastInteractionTime = Date.now();
+  }
+
+  /** 更新 NPC 心情 */
+  updateNPCMood(npcId: string, moodChange: 'improve' | 'worsen' | 'random' = 'random'): void {
+    const state = this.npcStates.get(npcId);
+    if (!state) return;
+
+    const currentIndex = NPC_MOODS.findIndex(m => m.mood === state.mood);
+    let newIndex = currentIndex;
+
+    switch (moodChange) {
+      case 'improve':
+        newIndex = Math.max(0, currentIndex - 1);
+        break;
+      case 'worsen':
+        newIndex = Math.min(NPC_MOODS.length - 1, currentIndex + 1);
+        break;
+      case 'random':
+        newIndex = Math.floor(Math.random() * NPC_MOODS.length);
+        break;
+    }
+
+    state.mood = NPC_MOODS[newIndex].mood;
+    state.lastInteractionTime = Date.now();
+  }
+
+  /** 获取所有在场 NPC 的状态 */
+  getAllNPCStates(): Array<{ id: string; name: string; activity: string; mood: string; emoji: string }> {
+    const result: Array<{ id: string; name: string; activity: string; mood: string; emoji: string }> = [];
+    
+    for (const [npcId, state] of this.npcStates) {
+      const profile = this.npcProfiles.get(npcId);
+      if (!profile) continue;
+
+      const moodInfo = NPC_MOODS.find(m => m.mood === state.mood) || NPC_MOODS[1];
+      result.push({
+        id: npcId,
+        name: profile.name,
+        activity: state.activity,
+        mood: state.mood,
+        emoji: moodInfo.emoji,
+      });
+    }
+
+    return result;
+  }
+
+  /** 设置当前回合数 */
+  setTurn(turn: number): void {
+    this.currentTurn = turn;
+  }
+
+  /** 为 NPC 初始化记忆管理器 */
+  initializeNPCMemory(npcId: string, sessionId: string): void {
+    if (!this.npcMemoryManagers.has(npcId)) {
+      const memoryManager = new MemoryManager({
+        sessionId: `${sessionId}_${npcId}`,
+      });
+      memoryManager.setTurn(this.currentTurn);
+      this.npcMemoryManagers.set(npcId, memoryManager);
+    }
+  }
+
+  /** 记录 NPC 对话记忆 */
+  recordNPCInteraction(
+    npcId: string,
+    playerAction: string,
+    npcResponse: string,
+    importance: number = 0.5,
+  ): void {
+    const memoryManager = this.npcMemoryManagers.get(npcId);
+    if (!memoryManager) return;
+
+    memoryManager.setTurn(this.currentTurn);
+    
+    const content = `玩家说：${playerAction}\n${this.npcProfiles.get(npcId)?.name || 'NPC'}回复：${npcResponse}`;
+    
+    memoryManager.remember(content, 'event' as MemoryType, importance, ['interaction', npcId]);
+  }
+
+  /** 记录重要事实 */
+  recordFact(
+    npcId: string,
+    fact: string,
+    importance: number = 0.8,
+  ): void {
+    const memoryManager = this.npcMemoryManagers.get(npcId);
+    if (!memoryManager) return;
+
+    memoryManager.setTurn(this.currentTurn);
+    memoryManager.remember(fact, 'fact' as MemoryType, importance, ['fact', npcId]);
+  }
+
+  /** 获取 NPC 相关记忆 */
+  getNPCMemories(npcId: string, query: string = ''): string {
+    const memoryManager = this.npcMemoryManagers.get(npcId);
+    if (!memoryManager) return '';
+
+    return memoryManager.getContextMemories(query);
+  }
+
+  /** 清除 NPC 记忆 */
+  clearNPCMemories(npcId: string): void {
+    const memoryManager = this.npcMemoryManagers.get(npcId);
+    if (!memoryManager) return;
+    memoryManager.clearSession();
+  }
+
+  /** 为 NPC 对话生成注入记忆 */
   protected buildSystemPrompt(request: AgentRequest): string {
     let prompt = this.config.systemPrompt;
 
@@ -102,6 +342,191 @@ export class NPCDirector extends BaseAgent {
       prompt += `\n\n===== 关系网 =====\n${this.relationshipWeb}`;
     }
 
+    // 注入 NPC 记忆
+    const npcId = request.context?.npcId as string;
+    if (npcId) {
+      const memories = this.getNPCMemories(npcId, request.content || '');
+      if (memories) {
+        prompt += `\n\n${memories}`;
+      }
+
+      // 注入 NPC 关系网
+      const relationshipPrompt = this.getRelationshipPrompt(npcId);
+      if (relationshipPrompt) {
+        prompt += relationshipPrompt;
+      }
+    }
+
     return prompt;
+  }
+
+  // ==================== 日程管理方法 ====================
+
+  /** 设置日程管理器的时间 */
+  setScheduleTime(time: GameTime): void {
+    this.scheduleManager.setCurrentTime(time);
+  }
+
+  /** 设置日程管理器的回合 */
+  setScheduleTurn(turn: number): void {
+    this.scheduleManager.setTurn(turn);
+  }
+
+  /** 获取 NPC 当前日程状态 */
+  getNPCScheduleState(npcId: string): {
+    activity: string;
+    location: string;
+    isPresent: boolean;
+    mood?: string;
+  } | null {
+    return this.scheduleManager.getNPCCurrentState(npcId);
+  }
+
+  /** 获取当前在场的 NPC 列表 */
+  getPresentNPCIds(): string[] {
+    return this.scheduleManager.getPresentNPCs();
+  }
+
+  /** 获取当前不在场的 NPC 列表 */
+  getAbsentNPCIds(): string[] {
+    return this.scheduleManager.getAbsentNPCs();
+  }
+
+  /** 更新日程并获取出现/离开事件 */
+  updateSchedule(): import('../types/schedule.js').NPCPresenceEvent[] {
+    return this.scheduleManager.update();
+  }
+
+  /** 同步日程状态到 NPC 状态 */
+  syncScheduleToNPCState(): void {
+    for (const [npcId, profile] of this.npcProfiles) {
+      const scheduleState = this.scheduleManager.getNPCCurrentState(npcId);
+      if (!scheduleState) continue;
+
+      // 如果 NPC 在场，更新其状态
+      if (scheduleState.isPresent) {
+        const existingState = this.npcStates.get(npcId);
+        if (existingState) {
+          // 更新活动和心情
+          existingState.activity = scheduleState.activity;
+          if (scheduleState.mood) {
+            existingState.mood = scheduleState.mood;
+          }
+        } else {
+          // 初始化新状态
+          this.initializeNPCState(npcId);
+          const newState = this.npcStates.get(npcId);
+          if (newState) {
+            newState.activity = scheduleState.activity;
+            if (scheduleState.mood) {
+              newState.mood = scheduleState.mood;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** 获取所有在场 NPC 的完整状态（用于 UI 展示） */
+  getAllPresentNPCsWithSchedule(): Array<{
+    id: string;
+    name: string;
+    activity: string;
+    location: string;
+    mood: string;
+    emoji: string;
+  }> {
+    const result: Array<{
+      id: string;
+      name: string;
+      activity: string;
+      location: string;
+      mood: string;
+      emoji: string;
+    }> = [];
+
+    const presentIds = this.scheduleManager.getPresentNPCs();
+
+    for (const npcId of presentIds) {
+      const profile = this.npcProfiles.get(npcId);
+      const scheduleState = this.scheduleManager.getNPCCurrentState(npcId);
+      const internalState = this.npcStates.get(npcId);
+
+      if (!profile || !scheduleState) continue;
+
+      // 确定心情
+      const mood = scheduleState.mood || internalState?.mood || 'calm';
+      const moodInfo = NPC_MOODS.find(m => m.mood === mood) || NPC_MOODS[1];
+
+      result.push({
+        id: npcId,
+        name: profile.name,
+        activity: scheduleState.activity,
+        location: scheduleState.location,
+        mood,
+        emoji: moodInfo.emoji,
+      });
+    }
+
+    return result;
+  }
+
+  // ==================== 关系网络管理方法 ====================
+
+  /** 获取两个NPC之间的关系 */
+  getRelationship(npcAId: string, npcBId: string) {
+    return this.relationshipManager.getRelationship(npcAId, npcBId);
+  }
+
+  /** 获取NPC的所有关系 */
+  getNPCRelationships(npcId: string) {
+    return this.relationshipManager.getNPCRelationships(npcId);
+  }
+
+  /** 更新NPC之间的好感度 */
+  updateRelationshipAffinity(
+    npcAId: string,
+    npcBId: string,
+    change: number,
+    reason: string,
+  ) {
+    return this.relationshipManager.updateAffinity(npcAId, npcBId, change, reason);
+  }
+
+  /** 记录NPC之间的社交互动 */
+  recordSocialInteraction(
+    initiatorId: string,
+    receiverId: string,
+    type: import('../types/relationship.js').SocialInteraction['type'],
+    content: string,
+    affinityChange: number,
+  ) {
+    return this.relationshipManager.recordInteraction(
+      initiatorId,
+      receiverId,
+      type,
+      content,
+      affinityChange,
+    );
+  }
+
+  /** 获取关系描述（用于对话生成） */
+  getRelationshipDescription(npcAId: string, npcBId: string): string {
+    return this.relationshipManager.getRelationshipDescription(npcAId, npcBId);
+  }
+
+  /** 获取关系提示（用于AI生成） */
+  getRelationshipPrompt(npcId: string): string {
+    return this.relationshipManager.getRelationshipPrompt(npcId);
+  }
+
+  /** 获取关系网络统计 */
+  getRelationshipStats() {
+    return this.relationshipManager.getStats();
+  }
+
+  /** 获取所有关系 */
+  getAllRelationships() {
+    return this.relationshipManager.getAllRelationships();
   }
 }

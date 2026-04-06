@@ -87,14 +87,36 @@ export class RuleEngine {
       }
     }
 
-    // 按分数排序
-    matches.sort((a, b) => b.score - a.score);
+    // 按分数和 insertionOrder 排序（insertionOrder 越小优先级越高）
+    matches.sort((a, b) => {
+      const scoreDiff = b.score - a.score;
+      if (Math.abs(scoreDiff) > 0.01) {
+        return scoreDiff;
+      }
+      const orderA = a.rule.insertionOrder ?? 50;
+      const orderB = b.rule.insertionOrder ?? 50;
+      return orderA - orderB;
+    });
     return matches;
+  }
+
+  /** 解析正则表达式字符串（支持 /pattern/flags 格式） */
+  private parseRegex(pattern: string): RegExp | null {
+    try {
+      const match = pattern.match(/^\/(.*)\/([gimsuy]*)$/);
+      if (match) {
+        return new RegExp(match[1], match[2]);
+      }
+      return new RegExp(pattern);
+    } catch (e) {
+      return null;
+    }
   }
 
   /** 计算规则与场景的匹配分数 */
   private calculateMatchScore(rule: RuleNode, context: SceneContext): RuleMatch {
     let keywordScore = 0;
+    let regexScore = 0;
     let semanticScore = 0;
     let reason: RuleMatch['reason'] = 'semantic';
     let matchedKeywords: string[] = [];
@@ -108,21 +130,22 @@ export class RuleEngine {
       };
     }
 
+    const textToMatch = [
+      context.description,
+      context.userInput,
+      context.location,
+      context.eventType,
+      ...(context.characters || []),
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     // 2. 关键词匹配（SillyTavern 风格）
     if (rule.keywords && rule.keywords.length > 0) {
-      const textToMatch = [
-        context.description,
-        context.userInput,
-        context.location,
-        context.eventType,
-        ...(context.characters || []),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+      const lowerText = textToMatch.toLowerCase();
 
       for (const keyword of rule.keywords) {
-        if (textToMatch.includes(keyword.toLowerCase())) {
+        if (lowerText.includes(keyword.toLowerCase())) {
           matchedKeywords.push(keyword);
         }
       }
@@ -133,15 +156,31 @@ export class RuleEngine {
       }
     }
 
-    // 3. 语义意图匹配（简化版 - 基于关键词相似度）
+    // 3. 正则表达式匹配
+    if (rule.regexPatterns && rule.regexPatterns.length > 0) {
+      let matchCount = 0;
+      for (const pattern of rule.regexPatterns) {
+        const regex = this.parseRegex(pattern);
+        if (regex && regex.test(textToMatch)) {
+          matchCount++;
+        }
+      }
+      regexScore = matchCount / rule.regexPatterns.length;
+      if (regexScore > 0) {
+        reason = 'keyword';
+      }
+    }
+
+    // 4. 语义意图匹配（简化版 - 基于关键词相似度）
     // 实际项目中可以使用向量嵌入
     if (this.config.enableSemanticMatch && rule.intent) {
       semanticScore = this.calculateSemanticSimilarity(rule.intent, context);
     }
 
-    // 4. 加权总分
+    // 5. 加权总分（关键词和正则表达式取最高值）
+    const maxKeywordRegexScore = Math.max(keywordScore, regexScore);
     const totalScore =
-      keywordScore * this.config.keywordWeight +
+      maxKeywordRegexScore * this.config.keywordWeight +
       semanticScore * this.config.semanticWeight;
 
     return {
@@ -222,12 +261,14 @@ export class RuleEngine {
 
   /** 根据 Token 预算选择规则 */
   private selectRulesByBudget(matches: RuleMatch[], config: RuleAssemblyConfig): RuleMatch[] {
-    // 简化版：按分数和权重排序后选择
-    // 实际项目应该估算 token 数
-
-    // 先按分数排序
+    // 按优先级排序（insertionOrder 越小越优先，然后是分数）
     const sorted = [...matches].sort((a, b) => {
-      // 考虑 tokenWeight
+      const orderA = a.rule.insertionOrder ?? 50;
+      const orderB = b.rule.insertionOrder ?? 50;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      // 如果 insertionOrder 相同，考虑 tokenWeight 和分数
       const scoreA = a.score * (a.rule.tokenWeight || 1);
       const scoreB = b.score * (b.rule.tokenWeight || 1);
       return scoreB - scoreA;

@@ -1,0 +1,6 @@
+- [x] LocalProvider 现在使用配置的 endpoint 而不是硬编码值
+- [x] LocalProvider 现在使用配置的 model 而不是硬编码值
+- [x] API 请求格式符合 OpenAI 兼容标准
+- [x] 所有现有测试通过（111/115 个通过，4个失败与修改无关）
+- [x] TypeScript 编译无错误
+- [x] 代码更改只涉及 local-provider.ts 文件

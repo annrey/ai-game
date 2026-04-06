@@ -9,11 +9,21 @@ import type { GameConfig } from '../types/game.js';
 
 const MODE_CONFIG: GameConfig = {
   mode: 'text-adventure',
-  language: 'zh-CN',
+  theme: 'fantasy',
+  enableCombat: true,
+  enableSave: true,
+  maxTurns: 1000,
+  difficulty: 'normal',
+  memoryMaxContextChars: 2000,
+  autoWorldTick: true,
+  idleTimeout: 300000,
   enabledAgents: ['narrator', 'world-keeper', 'rule-arbiter', 'drama-curator'],
-  streaming: true,
-  logging: true,
   maxHistoryTurns: 30,
+  logging: {
+    enabled: true,
+    level: 'info',
+  },
+  autoSaveInterval: 300000,
 };
 
 export function createTextAdventure(

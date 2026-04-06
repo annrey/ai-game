@@ -3,11 +3,68 @@
  * 管理场景状态的读写和持久化
  */
 
-import { writeFile, readFile, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import type { SceneState, SaveData, GameMode } from '../types/game.js';
+import type { GameTime, EnvironmentState, NPCState, Action, Resolution, PlotPoint, PlayerState, Quest, SceneState } from '../types/scene.js';
+import type { SaveData, GameMode } from '../types/game.js';
 import { v4 as uuidv4 } from 'uuid';
+import { TIME, TIME_PERIODS, HISTORY, LIMITS, GAME } from '../constants.js';
+
+// ============ 类型安全的路径类型定义 ============
+
+type Primitive = string | number | boolean | null | undefined;
+
+/**
+ * 获取对象的所有路径（包括嵌套路径）
+ * 用于类型安全的路径访问
+ */
+type Path<T, K extends keyof T = keyof T> = K extends string
+  ? T[K] extends Primitive
+    ? K
+    : T[K] extends (infer U)[]
+      ? U extends Primitive
+        ? K | `${K}[${number}]` | `${K}.${Path<T[K]>}`
+        : K | `${K}[${number}]` | `${K}.${Path<U>}`
+      : T[K] extends object
+        ? K | `${K}.${Path<T[K]>}`
+        : K
+  : never;
+
+/**
+ * 根据路径获取对应的值类型
+ */
+type PathValue<T, P extends string> = P extends keyof T
+  ? T[P]
+  : P extends `${infer K}.${infer Rest}`
+    ? K extends keyof T
+      ? Rest extends Path<T[K]>
+        ? PathValue<T[K], Rest>
+        : never
+      : K extends `${infer ArrKey}[${number}]`
+        ? ArrKey extends keyof T
+          ? T[ArrKey] extends (infer U)[]
+            ? PathValue<U, Rest>
+            : never
+          : never
+        : never
+    : P extends `${infer K}[${number}]`
+      ? K extends keyof T
+        ? T[K] extends (infer U)[]
+          ? U
+          : never
+        : never
+      : never;
+
+/**
+ * SceneState 的所有有效路径类型
+ */
+export type SceneStatePath = Path<SceneState>;
+
+/**
+ * 根据路径获取 SceneState 的值类型
+ */
+export type SceneStateValue<P extends SceneStatePath> = PathValue<SceneState, P>;
 
 /** 默认场景状态 */
 export function createDefaultSceneState(): SceneState {
@@ -19,10 +76,10 @@ export function createDefaultSceneState(): SceneState {
     playerActions: [],
     pendingResolutions: [],
     worldTime: {
-      day: 1,
-      hour: 8,
-      minute: 0,
-      period: 'morning',
+      day: GAME.DEFAULT_DAY,
+      hour: GAME.DEFAULT_HOUR,
+      minute: GAME.DEFAULT_MINUTE,
+      period: TIME_PERIODS.MORNING.name,
     },
     environment: {
       weather: '晴朗',
@@ -32,8 +89,32 @@ export function createDefaultSceneState(): SceneState {
     },
     playerState: {
       name: '冒险者',
-      health: 100,
-      inventory: [],
+      health: GAME.DEFAULT_HEALTH,
+      maxHealth: GAME.DEFAULT_MAX_HEALTH,
+      mana: GAME.DEFAULT_MANA,
+      maxMana: GAME.DEFAULT_MAX_MANA,
+      stamina: GAME.DEFAULT_STAMINA,
+      maxStamina: GAME.DEFAULT_MAX_STAMINA,
+      gold: 100, // 初始金币
+      visitedLocations: ['起始之地'],
+      explorationProgress: GAME.DEFAULT_EXPLORATION_PROGRESS,
+      inventory: [
+        {
+          id: uuidv4(),
+          name: '生锈的铁剑',
+          description: '一把用来防身的旧武器',
+          quantity: 1,
+          type: 'weapon'
+        },
+        {
+          id: uuidv4(),
+          name: '微型治疗药水',
+          description: '恢复少量生命值',
+          quantity: 3,
+          type: 'consumable'
+        }
+      ],
+      quests: [],
     },
   };
 }
@@ -60,8 +141,10 @@ export class StateStore {
       npcs: this.state.presentNPCs.map(n => `${n.name}(${n.disposition})`),
       time: `第${this.state.worldTime.day}天 ${this.state.worldTime.hour}:${String(this.state.worldTime.minute).padStart(2, '0')} (${this.state.worldTime.period})`,
       weather: this.state.environment.weather,
-      recentActions: this.state.playerActions.slice(-3).map(a => a.description),
+      recentActions: this.state.playerActions.slice(-HISTORY.RECENT_ACTIONS_COUNT).map(a => a.description),
       activePlots: this.state.activePlots.filter(p => p.status === 'active').map(p => p.name),
+      inventory: this.state.playerState.inventory.map(i => `${i.name}x${i.quantity}`),
+      quests: this.state.playerState.quests.map(q => `[${q.status}] ${q.title}: ${q.description}`),
     };
   }
 
@@ -71,11 +154,22 @@ export class StateStore {
   }
 
   /** 深度更新嵌套状态 */
-  patch(path: string, value: unknown): void {
+  patch<P extends SceneStatePath>(path: P, value: SceneStateValue<P>): void {
     const keys = path.split('.');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let target: any = this.state;
     for (let i = 0; i < keys.length - 1; i++) {
-      target = target[keys[i]];
+      const key = keys[i];
+      // 处理数组索引访问，如 "inventory[0]"
+      const arrayMatch = key.match(/^(.+)\[(\d+)\]$/);
+      if (arrayMatch) {
+        const [, arrKey, indexStr] = arrayMatch;
+        target = target[arrKey];
+        if (target === undefined) return;
+        target = target[parseInt(indexStr, 10)];
+      } else {
+        target = target[key];
+      }
       if (target === undefined) return;
     }
     target[keys[keys.length - 1]] = value;
@@ -83,22 +177,22 @@ export class StateStore {
 
   /** 推进游戏时间 */
   advanceTime(minutes: number): void {
-    let totalMinutes = this.state.worldTime.hour * 60 + this.state.worldTime.minute + minutes;
-    const extraDays = Math.floor(totalMinutes / (24 * 60));
-    totalMinutes = totalMinutes % (24 * 60);
+    let totalMinutes = this.state.worldTime.hour * TIME.MINUTES_PER_HOUR + this.state.worldTime.minute + minutes;
+    const extraDays = Math.floor(totalMinutes / TIME.MINUTES_PER_DAY);
+    totalMinutes = totalMinutes % TIME.MINUTES_PER_DAY;
 
-    const hour = Math.floor(totalMinutes / 60);
-    const minute = totalMinutes % 60;
+    const hour = Math.floor(totalMinutes / TIME.MINUTES_PER_HOUR);
+    const minute = totalMinutes % TIME.MINUTES_PER_HOUR;
 
     let period: SceneState['worldTime']['period'];
-    if (hour >= 5 && hour < 7) period = 'dawn';
-    else if (hour >= 7 && hour < 11) period = 'morning';
-    else if (hour >= 11 && hour < 13) period = 'noon';
-    else if (hour >= 13 && hour < 17) period = 'afternoon';
-    else if (hour >= 17 && hour < 19) period = 'dusk';
-    else if (hour >= 19 && hour < 22) period = 'evening';
-    else if (hour >= 22 || hour < 1) period = 'night';
-    else period = 'midnight';
+    if (hour >= TIME_PERIODS.DAWN.start && hour < TIME_PERIODS.DAWN.end) period = TIME_PERIODS.DAWN.name;
+    else if (hour >= TIME_PERIODS.MORNING.start && hour < TIME_PERIODS.MORNING.end) period = TIME_PERIODS.MORNING.name;
+    else if (hour >= TIME_PERIODS.NOON.start && hour < TIME_PERIODS.NOON.end) period = TIME_PERIODS.NOON.name;
+    else if (hour >= TIME_PERIODS.AFTERNOON.start && hour < TIME_PERIODS.AFTERNOON.end) period = TIME_PERIODS.AFTERNOON.name;
+    else if (hour >= TIME_PERIODS.DUSK.start && hour < TIME_PERIODS.DUSK.end) period = TIME_PERIODS.DUSK.name;
+    else if (hour >= TIME_PERIODS.EVENING.start && hour < TIME_PERIODS.EVENING.end) period = TIME_PERIODS.EVENING.name;
+    else if (hour >= TIME_PERIODS.NIGHT.start || hour < TIME_PERIODS.NIGHT.end) period = TIME_PERIODS.NIGHT.name;
+    else period = TIME_PERIODS.MIDNIGHT.name;
 
     this.state.worldTime = {
       day: this.state.worldTime.day + extraDays,
@@ -141,8 +235,40 @@ export class StateStore {
     return data;
   }
 
+  async listSaves(limit: number = LIMITS.SAVES_LIST_DEFAULT): Promise<Array<Pick<SaveData, 'id' | 'name' | 'mode' | 'createdAt' | 'updatedAt'>>> {
+    const dir = join(this.savePath, 'saves');
+    if (!existsSync(dir)) return [];
+    const files = (await readdir(dir)).filter(f => f.endsWith('.json')).slice(0, LIMITS.SAVES_FILE_SCAN_MAX);
+    const saves: Array<Pick<SaveData, 'id' | 'name' | 'mode' | 'createdAt' | 'updatedAt'>> = [];
+    for (const f of files) {
+      try {
+        const raw = await readFile(join(dir, f), 'utf-8');
+        const data = JSON.parse(raw) as SaveData;
+        if (!data?.id || !data?.name || !data?.mode) continue;
+        saves.push({
+          id: data.id,
+          name: data.name,
+          mode: data.mode,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        });
+      } catch {}
+    }
+    saves.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    return saves.slice(0, Math.max(1, Math.min(limit, LIMITS.SAVES_LIST_MAX)));
+  }
+
   /** 重置状态 */
   reset(): void {
     this.state = createDefaultSceneState();
+  }
+
+  /** 删除存档 */
+  async deleteSave(id: string): Promise<void> {
+    const filePath = join(this.savePath, 'saves', `${id}.json`);
+    if (existsSync(filePath)) {
+      const { unlink } = await import('fs/promises');
+      await unlink(filePath);
+    }
   }
 }

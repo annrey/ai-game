@@ -48,6 +48,15 @@ export interface AgentResponse {
   metadata?: Record<string, unknown>;
   /** token 使用量 */
   usage?: ChatResponse['usage'];
+  /** 错误信息（如果处理过程中发生错误） */
+  error?: {
+    /** 错误类型 */
+    type: string;
+    /** 错误消息 */
+    message: string;
+    /** 发生错误的代理角色 */
+    agentRole?: string;
+  };
 }
 
 /** 代理接口 */

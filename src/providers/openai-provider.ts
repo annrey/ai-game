@@ -14,14 +14,14 @@ export class OpenAIProvider extends BaseProvider {
   private client: OpenAI;
 
   constructor(config: {
-    apiKey: string;
+    apiKey?: string;
     baseURL?: string;
     defaultModel?: string;
   }) {
     super(config.defaultModel ?? 'gpt-4o');
     this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: config.baseURL ?? 'https://api.openai.com/v1',
+      apiKey: config.apiKey || 'not-provided',
+      baseURL: config.baseURL || 'https://api.openai.com/v1',
     });
   }
 

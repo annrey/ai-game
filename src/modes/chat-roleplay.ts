@@ -9,11 +9,21 @@ import type { GameConfig } from '../types/game.js';
 
 const MODE_CONFIG: GameConfig = {
   mode: 'chat-roleplay',
-  language: 'zh-CN',
+  theme: 'roleplay',
+  enableCombat: false,
+  enableSave: true,
+  maxTurns: 1000,
+  difficulty: 'normal',
+  memoryMaxContextChars: 2000,
+  autoWorldTick: false,
+  idleTimeout: 300000,
   enabledAgents: ['narrator', 'npc-director'],
-  streaming: true,
-  logging: false,
   maxHistoryTurns: 60,
+  logging: {
+    enabled: false,
+    level: 'info',
+  },
+  autoSaveInterval: 300000,
 };
 
 export function createChatRoleplay(

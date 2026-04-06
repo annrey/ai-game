@@ -3,7 +3,9 @@
  * 使用方法：npx tsx src/demo.ts [--mode adventure|battle|sandbox|roleplay]
  */
 
-import 'dotenv/config';
+import { loadTestConfig } from './utils/config.js';
+loadTestConfig();
+
 import * as readline from 'readline';
 import chalk from 'chalk';
 import { ProviderFactory } from './providers/provider-factory.js';
@@ -42,7 +44,7 @@ async function main() {
 
   // 初始化 Provider
   console.log(chalk.gray('正在初始化 AI Provider...'));
-  const factory = ProviderFactory.fromEnv();
+  const factory = await ProviderFactory.fromEnv();
   const availability = await factory.checkAvailability();
 
   for (const [name, available] of Object.entries(availability)) {

@@ -5,7 +5,7 @@
 
 import { EventBus, GameEvents } from './event-bus.js';
 import { StateStore } from './state-store.js';
-import type { NPCState, EnvironmentState, Action, PlotPoint } from '../types/scene.js';
+import type { NPCState, EnvironmentState, Action, PlotPoint, Quest } from '../types/scene.js';
 import { v4 as uuidv4 } from 'uuid';
 
 export class SceneManager {
@@ -105,5 +105,58 @@ export class SceneManager {
     );
     this.stateStore.update({ activePlots: plots });
     this.eventBus.emit(GameEvents.PLOT_ADVANCE, { plotId, status });
+  }
+
+  /** 添加或更新物品 */
+  updateInventoryItem(item: { name: string; quantity: number; action: 'add' | 'remove'; description?: string; type?: string }): void {
+    const state = this.stateStore.getState();
+    const inventory = [...state.playerState.inventory];
+    const existingIndex = inventory.findIndex(i => i.name === item.name);
+
+    if (item.action === 'add') {
+      if (existingIndex >= 0) {
+        inventory[existingIndex].quantity += item.quantity;
+      } else {
+        inventory.push({
+          id: uuidv4(),
+          name: item.name,
+          quantity: item.quantity,
+          description: item.description || '',
+          type: (item.type as any) || 'misc'
+        });
+      }
+    } else if (item.action === 'remove') {
+      if (existingIndex >= 0) {
+        inventory[existingIndex].quantity = Math.max(0, inventory[existingIndex].quantity - item.quantity);
+        if (inventory[existingIndex].quantity === 0) {
+          inventory.splice(existingIndex, 1);
+        }
+      }
+    }
+
+    this.stateStore.update({ playerState: { ...state.playerState, inventory } });
+    this.eventBus.emit('INVENTORY_UPDATE', { inventory });
+  }
+
+  /** 更新或添加任务 */
+  updateQuest(questUpdate: { questId: string; title: string; status: 'active' | 'completed' | 'failed'; description?: string }): void {
+    const state = this.stateStore.getState();
+    const quests = [...state.playerState.quests];
+    const existingIndex = quests.findIndex(q => q.questId === questUpdate.questId);
+
+    if (existingIndex >= 0) {
+      quests[existingIndex] = { ...quests[existingIndex], ...questUpdate };
+    } else {
+      quests.push({
+        id: uuidv4(),
+        questId: questUpdate.questId,
+        title: questUpdate.title,
+        status: questUpdate.status,
+        description: questUpdate.description || ''
+      });
+    }
+
+    this.stateStore.update({ playerState: { ...state.playerState, quests } });
+    this.eventBus.emit('QUEST_UPDATE', { quests });
   }
 }

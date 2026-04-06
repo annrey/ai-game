@@ -9,12 +9,22 @@ import type { GameConfig } from '../types/game.js';
 
 const MODE_CONFIG: GameConfig = {
   mode: 'npc-sandbox',
-  language: 'zh-CN',
+  theme: 'sandbox',
+  enableCombat: true,
+  enableSave: true,
+  maxTurns: 1000,
+  difficulty: 'normal',
+  memoryMaxContextChars: 2000,
+  autoWorldTick: true,
+  idleTimeout: 300000,
   // 全代理启用 — 沙盒模式需要所有能力
   enabledAgents: ['narrator', 'world-keeper', 'npc-director', 'rule-arbiter', 'drama-curator'],
-  streaming: true,
-  logging: true,
   maxHistoryTurns: 40,
+  logging: {
+    enabled: true,
+    level: 'info',
+  },
+  autoSaveInterval: 300000,
 };
 
 export function createNPCSandbox(

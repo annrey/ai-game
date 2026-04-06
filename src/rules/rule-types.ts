@@ -23,6 +23,16 @@ export interface RuleNode {
   intent: string;
   /** 触发关键词（兼容 SillyTavern 风格） */
   keywords?: string[];
+  /** 正则表达式模式（格式：/pattern/flags） */
+  regexPatterns?: string[];
+  /** 插入顺序优先级（默认50，数值越小优先级越高） */
+  insertionOrder?: number;
+  /** 插入位置策略 */
+  insertPosition?: 'before_char' | 'after_char' | 'in_chat';
+  /** 插入深度（用于in_chat位置） */
+  insertDepth?: number;
+  /** 插入角色 */
+  insertRole?: 'system' | 'user' | 'assistant';
   /** 父规则 - 继承 */
   parentRules?: string[];
   /** 冲突规则 */

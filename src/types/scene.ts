@@ -48,6 +48,43 @@ export interface PlotPoint {
   description: string;
 }
 
+export interface Quest {
+  id: string;
+  questId: string;
+  title: string;
+  description: string;
+  status: 'active' | 'completed' | 'failed';
+  objectives?: string[];
+}
+
+export interface PlayerState {
+  name: string;
+  role?: string;
+  background?: string;
+  worldName?: string;
+  genre?: string;
+  tone?: string;
+  health: number;
+  maxHealth: number;
+  mana: number;
+  maxMana: number;
+  stamina: number;
+  maxStamina: number;
+  /** 金币数量 */
+  gold: number;
+  visitedLocations: string[];
+  explorationProgress: number;
+  inventory: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    quantity: number;
+    type: 'weapon' | 'armor' | 'consumable' | 'quest' | 'misc';
+  }>;
+  quests: Quest[];
+  [key: string]: unknown;
+}
+
 /**
  * 核心场景状态 — 所有代理共享
  */
@@ -69,5 +106,5 @@ export interface SceneState {
   /** 环境状态 */
   environment: EnvironmentState;
   /** 玩家背包/状态 */
-  playerState: Record<string, unknown>;
+  playerState: PlayerState;
 }

@@ -5,6 +5,7 @@
 
 import type { AIProvider, ChatMessage, ChatOptions } from '../types/provider.js';
 import type { AgentConfig, AgentRequest, AgentResponse, AgentRole, GameAgent } from '../types/agent.js';
+import { HISTORY, TEMPERATURE } from '../constants.js';
 
 export abstract class BaseAgent implements GameAgent {
   readonly role: AgentRole;
@@ -14,7 +15,7 @@ export abstract class BaseAgent implements GameAgent {
   protected provider: AIProvider;
   protected model?: string;
   protected history: ChatMessage[] = [];
-  protected maxHistory = 20;
+  protected maxHistory: number = HISTORY.AGENT_MAX_HISTORY;
 
   constructor(config: AgentConfig, provider: AIProvider, model?: string) {
     this.role = config.role;
@@ -29,7 +30,7 @@ export abstract class BaseAgent implements GameAgent {
 
     const options: ChatOptions = {
       model: this.model,
-      temperature: this.config.temperature ?? 0.7,
+      temperature: this.config.temperature ?? TEMPERATURE.DEFAULT,
     };
 
     const response = await this.provider.chat(messages, options);
@@ -57,7 +58,7 @@ export abstract class BaseAgent implements GameAgent {
     const messages = this.buildMessages(request);
     const options: ChatOptions = {
       model: this.model,
-      temperature: this.config.temperature ?? 0.7,
+      temperature: this.config.temperature ?? TEMPERATURE.DEFAULT,
     };
 
     let full = '';
@@ -76,6 +77,14 @@ export abstract class BaseAgent implements GameAgent {
 
   reset(): void {
     this.history = [];
+  }
+
+  setMaxHistoryTurns(maxTurns: number): void {
+    const v = Math.max(1, Math.min(Math.floor(maxTurns), HISTORY.AGENT_MAX_HISTORY_TURNS));
+    this.maxHistory = v;
+    if (this.history.length > this.maxHistory * 2) {
+      this.history = this.history.slice(-this.maxHistory * 2);
+    }
   }
 
   protected buildMessages(request: AgentRequest): ChatMessage[] {

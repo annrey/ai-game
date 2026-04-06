@@ -16,6 +16,7 @@
     "test:local": "tsx src/test-local.ts",
     "server": "tsx src/server.ts",
     "server:watch": "tsx watch src/server.ts",
+    "server:ui": "UI_ONLY=true tsx src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

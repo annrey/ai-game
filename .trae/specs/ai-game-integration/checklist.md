@@ -1,0 +1,4 @@
+- [x] `state-store.ts` 包含 `inventory` 和 `quests` 字段及其增删改方法。
+- [x] `game-engine.ts` 的解析逻辑 (`resolveActionAndPushState`) 能够正确识别并处理 AI 意图解析出的 `inventoryChange` 和 `questUpdate`。
+- [x] AI 在叙事时能够感知到玩家的当前物品和任务状态（即 `context` 对象中包含相关数据并提供给了 Narrator）。
+- [x] 前端界面（`ui/index.html`）有专属区域实时展示玩家的物品和任务日志。

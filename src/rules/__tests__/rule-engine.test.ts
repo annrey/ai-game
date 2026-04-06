@@ -203,4 +203,61 @@ describe('RuleEngine', () => {
       expect(result.conflicts.some(c => c.conflictType === 'inheritance')).toBe(true);
     });
   });
+
+  describe('正则表达式匹配', () => {
+    it('应支持正则表达式匹配', () => {
+      engine.addRule(makeRule({
+        id: 'regex-1',
+        content: '测试正则规则',
+        regexPatterns: ['/测试\\d+/i'],
+      }));
+      const context: SceneContext = { description: '这里有测试123' };
+      const matches = engine.matchRules(context);
+      const regexMatch = matches.find(m => m.rule.id === 'regex-1');
+      expect(regexMatch).toBeDefined();
+      expect(regexMatch!.score).toBeGreaterThan(0);
+    });
+
+    it('应支持 /pattern/flags 格式的正则表达式', () => {
+      engine.addRule(makeRule({
+        id: 'regex-2',
+        content: '不区分大小写规则',
+        regexPatterns: ['/hello/i'],
+      }));
+      const context: SceneContext = { description: 'HELLO WORLD' };
+      const matches = engine.matchRules(context);
+      const regexMatch = matches.find(m => m.rule.id === 'regex-2');
+      expect(regexMatch).toBeDefined();
+      expect(regexMatch!.score).toBeGreaterThan(0);
+    });
+
+    it('关键词和正则表达式应能同时工作', () => {
+      engine.addRule(makeRule({
+        id: 'both-1',
+        content: '关键词+正则规则',
+        keywords: ['关键词'],
+        regexPatterns: ['/\\d+/'],
+      }));
+      const context: SceneContext = { description: '关键词 123' };
+      const matches = engine.matchRules(context);
+      const bothMatch = matches.find(m => m.rule.id === 'both-1');
+      expect(bothMatch).toBeDefined();
+      expect(bothMatch!.score).toBeGreaterThan(0);
+    });
+  });
+
+  describe('insertionOrder 优先级', () => {
+    it('应按 insertionOrder 排序，数值越小优先级越高', () => {
+      engine.addRule(makeRule({ id: 'low-priority', content: '低优先级', insertionOrder: 80 }));
+      engine.addRule(makeRule({ id: 'high-priority', content: '高优先级', insertionOrder: 20 }));
+      engine.addRule(makeRule({ id: 'default-priority', content: '默认优先级' }));
+      
+      const context: SceneContext = { description: '测试' };
+      const matches = engine.matchRules(context);
+      
+      const order = matches.map(m => m.rule.id);
+      expect(order.indexOf('high-priority')).toBeLessThan(order.indexOf('default-priority'));
+      expect(order.indexOf('default-priority')).toBeLessThan(order.indexOf('low-priority'));
+    });
+  });
 });

@@ -4,42 +4,58 @@
  */
 
 import { BaseProvider } from './base-provider.js';
+import { retryWithBackoff, retryWithBackoffStream, type RetryOptions } from '../utils/retry.js';
 import type { ChatMessage, ChatOptions, ChatResponse, StreamChunk, ModelInfo, ProviderConfig } from '../types/provider.js';
 
 export class LocalProvider extends BaseProvider {
   readonly name: string;
-  readonly type: ProviderConfig['type'] = 'local';
+  readonly type: ProviderConfig['type'];
 
   private endpoint: string;
+  private apiKey?: string;
+  private retryOptions: RetryOptions;
 
   constructor(config?: {
     endpoint?: string;
+    apiKey?: string;
     defaultModel?: string;
     name?: string;
+    type?: ProviderConfig['type'];
+    retryOptions?: RetryOptions;
   }) {
-    super(config?.defaultModel ?? 'local-model');
-    this.endpoint = (config?.endpoint ?? 'http://localhost:1234/v1').replace(/\/$/, '');
-    this.name = config?.name ?? 'LocalAI';
+    super(config?.defaultModel || 'local-model');
+    this.endpoint = (config?.endpoint || 'http://localhost:1234/v1').replace(/\/$/, '');
+    this.apiKey = config?.apiKey;
+    this.name = config?.name || 'LocalAI';
+    this.type = config?.type || 'local';
+    this.retryOptions = config?.retryOptions ?? {
+      maxRetries: 3,
+      baseDelay: 1000,
+      onRetry: (attempt, maxRetries, delay, error) => {
+        console.log(
+          `[${this.name}] Retry ${attempt}/${maxRetries} after ${delay}ms due to: ${error.message}`
+        );
+      },
+    };
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-    return this.withRetry(async () => {
-      const body: Record<string, unknown> = {
-        model: this.getModel(options),
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        temperature: options?.temperature ?? 0.7,
-        stream: false,
+    return retryWithBackoff(async () => {
+      const model = options?.model || this.defaultModel;
+      
+      const body = {
+        model,
+        messages,
       };
-      if (options?.maxTokens) body.max_tokens = options.maxTokens;
-      if (options?.topP) body.top_p = options.topP;
-      if (options?.stop) body.stop = options.stop;
-      if (options?.responseFormat === 'json') {
-        body.response_format = { type: 'json_object' };
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
       }
 
       const res = await fetch(`${this.endpoint}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       });
 
@@ -48,11 +64,13 @@ export class LocalProvider extends BaseProvider {
       }
 
       const data = await res.json() as any;
-      const choice = data.choices?.[0];
+      
+      // 尝试匹配响应中的内容字段 (兼容 response 或 content 字段)
+      const content = data.response || data.content || data.choices?.[0]?.message?.content || '';
 
       return {
-        content: choice?.message?.content ?? '',
-        model: data.model ?? this.defaultModel,
+        content,
+        model: data.model || model,
         usage: data.usage
           ? {
               promptTokens: data.usage.prompt_tokens ?? 0,
@@ -60,71 +78,89 @@ export class LocalProvider extends BaseProvider {
               totalTokens: data.usage.total_tokens ?? 0,
             }
           : undefined,
-        finishReason: choice?.finish_reason,
+        finishReason: data.choices?.[0]?.finish_reason,
       };
-    });
+    }, this.retryOptions);
   }
 
   async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<StreamChunk> {
-    const body: Record<string, unknown> = {
-      model: this.getModel(options),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-      temperature: options?.temperature ?? 0.7,
-      stream: true,
-    };
-    if (options?.maxTokens) body.max_tokens = options.maxTokens;
-    if (options?.topP) body.top_p = options.topP;
-    if (options?.stop) body.stop = options.stop;
+    const makeStream = async function* (this: LocalProvider): AsyncIterable<StreamChunk> {
+      const model = options?.model || this.defaultModel;
 
-    const res = await fetch(`${this.endpoint}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+      const body = {
+        model,
+        messages,
+        stream: true,
+      };
 
-    if (!res.ok) {
-      throw new Error(`Local AI stream error: ${res.status}`);
-    }
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
 
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error('No response body');
+      const res = await fetch(`${this.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+      if (!res.ok) {
+        throw new Error(`Local AI stream error: ${res.status}`);
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No response body');
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') {
-          yield { content: '', done: true };
-          return;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            yield { content: delta, done: false };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          
+          // 处理可能没有 data: 前缀的 JSON 块
+          let dataStr = trimmed;
+          if (trimmed.startsWith('data: ')) {
+            dataStr = trimmed.slice(6);
           }
-        } catch {
-          // skip malformed chunks
+          
+          if (dataStr === '[DONE]') {
+            yield { content: '', done: true };
+            return;
+          }
+          try {
+            const parsed = JSON.parse(dataStr);
+            // 尝试匹配可能的内容字段
+            const delta = parsed.response || parsed.content || parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.text;
+            if (delta) {
+              yield { content: delta, done: false };
+            }
+          } catch {
+            // skip malformed chunks
+          }
         }
       }
-    }
-    yield { content: '', done: true };
+      yield { content: '', done: true };
+    }.bind(this);
+
+    yield* retryWithBackoffStream(makeStream, this.retryOptions);
   }
 
   async listModels(): Promise<ModelInfo[]> {
     try {
-      const res = await fetch(`${this.endpoint}/models`);
+      const headers: Record<string, string> = {};
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
+      const res = await fetch(`${this.endpoint}/models`, { headers });
       if (!res.ok) return [];
       const data = await res.json() as any;
       return (data.data ?? []).map((m: any) => ({
@@ -139,7 +175,11 @@ export class LocalProvider extends BaseProvider {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.endpoint}/models`, { method: 'GET' });
+      const headers: Record<string, string> = {};
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
+      const res = await fetch(`${this.endpoint}/models`, { method: 'GET', headers });
       return res.ok;
     } catch {
       return false;

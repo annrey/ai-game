@@ -42,7 +42,7 @@ export interface ModelInfo {
 }
 
 export interface ProviderConfig {
-  type: 'openai' | 'ollama' | 'local';
+  type: 'openai' | 'ollama' | 'local' | 'lmstudio' | 'jan';
   baseURL?: string;
   apiKey?: string;
   host?: string;

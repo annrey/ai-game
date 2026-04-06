@@ -93,8 +93,9 @@ describe('StateStore', () => {
     });
 
     it('当路径不存在时应静默忽略', () => {
-      // 不应抛出错误
-      store.patch('nonexistent.deep.path', 'value');
+      // 不应抛出错误 - 使用类型断言绕过类型检查以测试运行时行为
+      // @ts-expect-error 测试无效路径的运行时行为
+      store.patch('environment.nonexistent', 'value');
       expect(store.getState().currentLocation).toBe('起始之地');
     });
   });

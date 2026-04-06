@@ -3,4 +3,5 @@ dist/
 data/saves/
 data/logs/
 .env
+.env.test.local
 *.tsbuildinfo
