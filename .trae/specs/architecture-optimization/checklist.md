@@ -1,0 +1,7 @@
+- [x] 成功将 `ui/index.html` 拆分为多文件结构（CSS, JS, HTML），且不再是一个巨大的单体文件。
+- [x] 前端应用可以正常启动（通过 Vite 或其他构建工具），并且聊天交互、思维链展示、动画效果完全正常运行。
+- [x] `GameEngine` (`src/engine/game-engine.ts`) 的代码行数大幅减少，移除了所有成就解锁的具体判断逻辑。
+- [x] `GameEngine` 中不再硬编码 `provider.chat` 来解析状态，而是通过 `RuleArbiter` (或其他专职代理) 返回标准的数据结构。
+- [x] 物品和任务生成的业务逻辑成功转移到了 `ItemManager` 和 `QuestManager` 中，并通过 `EventBus` 进行解耦通信。
+- [x] 所有的现有 `vitest` 单元测试依然能够通过（如果有必要的话，补充了对应 Manager 的新测试）。
+- [x] 整体代码结构更加清晰，为后续的 pnpm workspace (Monorepo) 重构打下了基础。

@@ -1,0 +1,8 @@
+- [x] 根目录存在有效的 `ROADMAP.md` 文件，包含未来三个阶段（短期、中期、远期）的发展规划。
+- [x] 根目录存在有效的 `pnpm-workspace.yaml` 配置文件，且明确划分了 `apps/*` 和 `packages/*`。
+- [x] 成功将项目结构划分为 `apps/server`, `apps/ui`, `packages/core`, `packages/shared-types`, `packages/memory`, `packages/plugin-sdk` 等。
+- [x] `packages/plugin-sdk` 基础框架已建立，包含标准的扩展接口（Provider, Mode, Skill）。
+- [x] 核心引擎成功使用 `ExtensionLoader` 加载了至少一个基于插件系统（Plugin SDK）的扩展模块。
+- [x] 整个项目可以通过 `pnpm install` 正常安装依赖。
+- [x] 可以通过 `pnpm dev` 正常启动前后端应用。
+- [x] 所有的现有 `vitest` 单元测试在重组后的包结构下依然能够通过。

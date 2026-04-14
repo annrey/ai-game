@@ -1,51 +1,29 @@
 {
-  "name": "ai-storyteller-engine",
+  "name": "ai-storyteller-engine-monorepo",
   "version": "0.1.0",
-  "description": "AI说书人委员会 — 多代理游戏引擎",
-  "type": "module",
-  "main": "dist/index.js",
+  "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format esm --dts",
-    "start": "node dist/index.js",
-    "demo": "tsx src/demo.ts",
-    "demo:adventure": "tsx src/demo.ts --mode adventure",
-    "demo:battle": "tsx src/demo.ts --mode battle",
-    "demo:sandbox": "tsx src/demo.ts --mode sandbox",
-    "demo:roleplay": "tsx src/demo.ts --mode roleplay",
-    "test:local": "tsx src/test-local.ts",
-    "server": "tsx src/server.ts",
-    "server:watch": "tsx watch src/server.ts",
-    "server:ui": "UI_ONLY=true tsx src/server.ts",
+    "dev:backend": "npx pnpm --filter @openclaw/server dev",
+    "dev:ui": "npx pnpm --filter @openclaw/ui dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:ui\"",
+    "build": "pnpm -r build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "docker:build": "docker build -t ai-storyteller .",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
-  },
-  "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "chalk": "^5.3.0",
-    "cors": "^2.8.6",
-    "dotenv": "^16.4.5",
-    "eventemitter3": "^5.0.1",
-    "express": "^5.2.1",
-    "ollama": "^0.5.11",
-    "openai": "^4.60.0",
-    "uuid": "^10.0.0",
-    "zod": "^3.23.8"
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
-    "@types/uuid": "^10.0.0",
-    "@vitest/coverage-v8": "^4.1.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "concurrently": "^9.2.1",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.2"
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }
