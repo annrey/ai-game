@@ -5,3 +5,24 @@ data/logs/
 .env
 .env.test.local
 *.tsbuildinfo
+
+# Rust build artifacts
+target/
+**/target/
+*.rs.bk
+*.pdb
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/*.local
+
+# Tauri / Bevy
+newgame/dist/
+newgame/src-tauri/gen/
+newgame/src-tauri/icons/
+
+# Local DB and incremental data
+data/memories.db
+*.sqlite
+*.sqlite-journal
