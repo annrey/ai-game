@@ -1,9 +1,10 @@
 use game_core::{
-    agents::{AgentManager, NarratorAgent},
+    agents::{AgentManager},
+    agents::narrator::NarratorAgent,
     engine::GameEngine,
     engine_handle::EngineHandle,
     event_bus::EventBus,
-    providers::provider_factory::ProviderFactory,
+    providers::ProviderFactory,
     rules::RuleEngine,
     state_store::{StateStore, WorldState},
 };
@@ -317,7 +318,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             save_dir: "./saves".to_string(),
-            memory_store: Arc::new(memory::store::InMemoryStore::default()),
+            memory_store: Arc::new(memory::InMemoryStore::default()),
         }
     }
 }

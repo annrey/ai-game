@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::game_state::{ConnectionStatus, EngineBackend};
+use crate::runtime::EngineCommand;
 
 pub struct GameUIPlugin;
 
@@ -169,7 +170,7 @@ fn render_choice_panel(
             ui.add_space(10.0);
 
             let choices: Vec<_> = state.choices.clone();
-            let mut submitted_text: Option<String> = None;
+            let mut selected_choice: Option<(String, String)> = None;
 
             ui.horizontal_wrapped(|ui: &mut egui::Ui| {
                 for (i, choice) in choices.iter().enumerate() {
@@ -193,7 +194,7 @@ fn render_choice_panel(
                     if button.clicked() && !state.is_processing {
                         state.selected_choice = Some(i);
                         state.is_processing = true;
-                        submitted_text = Some(choice.text.clone());
+                        selected_choice = Some((choice.id.clone(), choice.text.clone()));
                     }
 
                     if let Some(desc) = &choice.description {
@@ -206,10 +207,9 @@ fn render_choice_panel(
                 }
             });
 
-            if let Some(text) = submitted_text {
+            if let Some((id, text)) = selected_choice {
                 drop(state);
-                let bridge = engine_bridge.bridge.lock().unwrap();
-                let _ = bridge.process_input(&text, &game_core::WorldState::default());
+                let _ = engine_bridge.bridge.cmd_tx.send(EngineCommand::ChoiceSelected { id, text });
             }
         });
 }

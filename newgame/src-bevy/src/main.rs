@@ -6,12 +6,12 @@ mod game_state;
 mod ui;
 mod visuals;
 mod engine_bridge;
+mod runtime;
 
 use game_state::GameState;
 use ui::GameUIPlugin;
 use visuals::SceneBackgroundPlugin;
-use engine_bridge::{EngineBridge, convert_world_state_to_game_state};
-use game_core::WorldState;
+use runtime::{EngineBridge, EngineRuntime, RuntimeConfig, EngineCommand};
 
 fn main() {
     App::new()
@@ -31,8 +31,7 @@ fn main() {
         .add_systems(Startup, setup_game)
         .add_systems(Update, (
             handle_player_input,
-            sync_engine_state,
-            dispatch_inputs,
+            drain_snapshots,
         ))
         .run();
 }
@@ -44,15 +43,13 @@ struct GameStateResource {
 
 #[derive(Resource)]
 struct EngineBridgeResource {
-    bridge: Arc<Mutex<EngineBridge>>,
+    bridge: EngineBridge,
 }
 
 impl Default for EngineBridgeResource {
     fn default() -> Self {
-        let bridge = EngineBridge::new().expect("Failed to create EngineBridge");
-        Self {
-            bridge: Arc::new(Mutex::new(bridge)),
-        }
+        let bridge = EngineRuntime::spawn(RuntimeConfig::default());
+        Self { bridge }
     }
 }
 
@@ -63,14 +60,12 @@ fn setup_game(
 ) {
     commands.spawn(Camera2d::default());
 
-    let bridge = engine_bridge.bridge.lock().unwrap();
-    if let Ok(world_state) = bridge.get_world_state() {
-        let state = convert_world_state_to_game_state(&world_state);
-        game_state.state = Arc::new(Mutex::new(state));
-    } else {
-        let state = GameState::new();
-        game_state.state = Arc::new(Mutex::new(state));
-    }
+    // Request initial snapshot from engine
+    let _ = engine_bridge.bridge.cmd_tx.send(EngineCommand::RequestSnapshot);
+
+    // Start with default game state
+    let state = GameState::new();
+    game_state.state = Arc::new(Mutex::new(state));
 
     setup_initial_scene(&mut commands);
 }
@@ -99,33 +94,86 @@ fn handle_player_input(
         let state = game_state.state.lock().unwrap();
         if !state.is_processing {
             drop(state);
-            let bridge = engine_bridge.bridge.lock().unwrap();
-            let _ = bridge.process_input("继续探索", &WorldState::default());
+            let _ = engine_bridge.bridge.cmd_tx.send(EngineCommand::PlayerInput(
+                "继续探索".to_string()
+            ));
         }
     }
 }
 
-fn sync_engine_state(
+fn drain_snapshots(
     game_state: ResMut<GameStateResource>,
     engine_bridge: ResMut<EngineBridgeResource>,
 ) {
-    let bridge = engine_bridge.bridge.lock().unwrap();
-    if let Ok(world_state) = bridge.get_world_state() {
+    // Drain all available snapshots from the channel
+    while let Ok(snapshot) = engine_bridge.bridge.snap_rx.try_recv() {
         let mut state = game_state.state.lock().unwrap();
-        *state = convert_world_state_to_game_state(&world_state);
-    }
-}
 
-fn dispatch_inputs(
-    game_state: ResMut<GameStateResource>,
-    engine_bridge: ResMut<EngineBridgeResource>,
-) {
-    let bridge = engine_bridge.bridge.lock().unwrap();
-    let _ = bridge.dispatch_pending_inputs();
+        // Update processing state
+        state.is_processing = snapshot.pending;
 
-    if let Some(narrative) = bridge.try_receive_narrative() {
-        let mut state = game_state.state.lock().unwrap();
-        state.add_narrative(narrative, false);
-        state.is_processing = false;
+        // Update narrative if there's new content
+        if let Some(narrative) = snapshot.narrative_delta {
+            state.add_narrative(narrative.content, narrative.is_player);
+        }
+
+        // Update world state from snapshot
+        state.location_name = snapshot.world.location_name.clone();
+        state.chapter = snapshot.world.chapter.clone();
+        state.turn_count = snapshot.world.turn_count as i32;
+        state.health = snapshot.world.health;
+        state.max_health = snapshot.world.max_health;
+        state.mana = snapshot.world.mana;
+        state.max_mana = snapshot.world.max_mana;
+        state.energy = snapshot.world.energy;
+        state.max_energy = snapshot.world.max_energy;
+        state.exploration_percent = snapshot.world.exploration_percent;
+        state.locations_discovered = snapshot.world.locations_discovered;
+        state.npcs_met = snapshot.world.npcs_met;
+        state.items_collected = snapshot.world.items_collected;
+
+        // Update inventory
+        state.inventory = snapshot.world.inventory.iter().map(|i| {
+            crate::game_state::InventoryItem {
+                id: i.id.clone(),
+                name: i.name.clone(),
+                item_type: crate::game_state::ItemType::Misc, // Simplified mapping
+                quantity: i.quantity,
+                description: i.description.clone(),
+                icon: i.icon.clone(),
+            }
+        }).collect();
+
+        // Update quests
+        state.quests = snapshot.world.quests.iter().map(|q| {
+            crate::game_state::Quest {
+                id: q.id.clone(),
+                title: q.title.clone(),
+                description: q.description.clone(),
+                status: crate::game_state::QuestStatus::Active, // Simplified mapping
+                objectives: vec![],
+            }
+        }).collect();
+
+        // Update choices
+        state.choices = snapshot.world.choices.iter().map(|c| {
+            crate::game_state::PlayerChoice {
+                id: c.id.clone(),
+                text: c.text.clone(),
+                description: c.description.clone(),
+                icon: c.icon.clone(),
+                enabled: c.enabled,
+            }
+        }).collect();
+
+        // Update engine snapshot status
+        state.engine_snapshot.connection_status = if snapshot.last_error.is_some() {
+            crate::game_state::ConnectionStatus::Error
+        } else {
+            crate::game_state::ConnectionStatus::Online
+        };
+        if let Some(err) = snapshot.last_error {
+            state.engine_snapshot.last_error = Some(err);
+        }
     }
 }
