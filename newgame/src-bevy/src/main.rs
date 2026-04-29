@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 mod game_state;
 mod ui;
 mod visuals;
-mod engine_bridge;
 mod runtime;
 
 use game_state::GameState;
