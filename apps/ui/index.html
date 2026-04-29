@@ -587,6 +587,65 @@
     </div>
   </dialog>
 
+  <dialog class="dialog dialog-wide" id="worldBuilderDialog" aria-label="世界构建器">
+    <div class="dialog-header">
+      <div class="dialog-title">🏗️ 世界构建器</div>
+      <button type="button" class="dialog-close btn-reset focus-ring" id="closeWorldBuilder" aria-label="关闭">✕</button>
+    </div>
+    <div class="dialog-body dialog-body-wide">
+      <div class="wb-tabs">
+        <button type="button" class="wb-tab active" data-wb-tab="overview">📋 概览</button>
+        <button type="button" class="wb-tab" data-wb-tab="map">🗺️ 地图</button>
+        <button type="button" class="wb-tab" data-wb-tab="characters">👤 角色</button>
+        <button type="button" class="wb-tab" data-wb-tab="factions">🏛️ 派系</button>
+        <button type="button" class="wb-tab" data-wb-tab="quests">📜 任务</button>
+        <button type="button" class="wb-tab" data-wb-tab="timeline">📅 时间线</button>
+      </div>
+
+      <div class="wb-panels">
+        <div class="wb-panel active" data-wb-panel="overview">
+          <div id="wbOverviewContent"></div>
+        </div>
+
+        <div class="wb-panel" data-wb-panel="map">
+          <div class="wb-map-container">
+            <div class="wb-map-toolbar">
+              <button class="wb-btn wb-btn-primary" onclick="addNewLocation()">➕ 添加地点</button>
+              <button class="wb-btn wb-btn-secondary" onclick="worldBuilderState.mapZoom = 1; worldBuilderState.mapOffset = {x:0,y:0}; renderMapEditor();">⟲ 重置视图</button>
+            </div>
+            <div class="wb-map-wrapper">
+              <canvas id="wbMapCanvas" class="wb-map-canvas"></canvas>
+              <div class="wb-location-editor" id="wbLocationEditor" style="display:none;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wb-panel" data-wb-panel="characters">
+          <div class="wb-characters-layout">
+            <div class="wb-characters-sidebar">
+              <div id="wbCharacterList"></div>
+            </div>
+            <div class="wb-characters-main">
+              <div id="wbCharacterEditor"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wb-panel" data-wb-panel="factions">
+          <div id="wbFactionGraph"></div>
+        </div>
+
+        <div class="wb-panel" data-wb-panel="quests">
+          <div id="wbQuestTree"></div>
+        </div>
+
+        <div class="wb-panel" data-wb-panel="timeline">
+          <div id="wbTimeline"></div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <dialog class="dialog" id="architectureDialog" aria-label="AI 架构">
     <div class="dialog-header">
       <div class="dialog-title">AI Architecture</div>
@@ -699,6 +758,10 @@
           <span class="nav-icon">⚙️</span>
           设置
         </button>
+        <button type="button" class="nav-item btn-reset focus-ring" id="navOpenWorldBuilder" data-nav-utility="true">
+          <span class="nav-icon">🏗️</span>
+          世界构建器
+        </button>
         <button type="button" class="nav-item btn-reset focus-ring" id="navOpenWorldForge" data-nav-utility="true">
           <span class="nav-icon">🪄</span>
           塑造世界
@@ -773,6 +836,10 @@
           <span id="metaWorldTime">⏱️ 第1天 · 清晨</span>
         </div>
         <div class="header-actions" aria-label="移动端面板开关">
+          <button type="button" class="header-btn btn-reset focus-ring" id="openWorldBuilder" aria-haspopup="dialog">
+            <span aria-hidden="true">🏗️</span>
+            世界构建器
+          </button>
           <button type="button" class="header-btn btn-reset focus-ring" id="openOnboarding" aria-haspopup="dialog">
             <span aria-hidden="true">✨</span>
             创建世界

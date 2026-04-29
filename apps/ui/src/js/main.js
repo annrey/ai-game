@@ -6,9 +6,8 @@ import './ui-render.js';
 import './dialogs.js';
 import './core.js';
 import './guide.js';
-
-
-    // 游戏状态
+import './creator-mode.js';
+import './world-builder.js';   // 游戏状态
     window.gameState = {
       turnCount: 0,
       isProcessing: false,

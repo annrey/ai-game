@@ -161,7 +161,7 @@ export class RustGameEngineBridge extends EventEmitter {
   /** 获取当前世界状态快照 */
   public async getState(): Promise<any> {
     if (!this.rustEngine) return {};
-    const stateStr = await this.rustEngine.get_state();
+    const stateStr = await this.rustEngine.getState();
     return JSON.parse(stateStr);
   }
 

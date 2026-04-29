@@ -15,6 +15,15 @@ impl SqliteMemoryStore {
         Self { pool }
     }
 
+    pub async fn new_in_memory() -> Result<Self, MemoryError> {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .map_err(|e| MemoryError::Internal(e.to_string()))?;
+        let store = Self { pool };
+        store.init().await?;
+        Ok(store)
+    }
+
     pub async fn init(&self) -> Result<(), MemoryError> {
         sqlx::query(
             r#"
@@ -159,5 +168,13 @@ impl MemoryStore for SqliteMemoryStore {
         }
 
         Ok(entries)
+    }
+
+    async fn clear(&self) -> Result<(), MemoryError> {
+        sqlx::query("DELETE FROM memories")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MemoryError::Internal(e.to_string()))?;
+        Ok(())
     }
 }

@@ -6,6 +6,9 @@ pub mod agents;
 pub mod providers;
 pub mod rules;
 pub mod engine;
+pub mod engine_handle;
+pub mod modes;
+pub mod world_builder;
 
 pub use models::{Quest, Item, InventorySlot, QuestStatus, ItemType};
 pub use events::GameEvent;
@@ -13,3 +16,5 @@ pub use event_bus::EventBus;
 pub use state_store::{StateStore, WorldState};
 pub use rules::RuleEngine;
 pub use engine::GameEngine;
+pub use engine_handle::EngineHandle;
+pub use modes::GameMode;
