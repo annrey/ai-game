@@ -31,9 +31,7 @@ export interface EngineOptions {
   providerFactory: ProviderFactory;
   dataPath: string;
   initialState?: SceneState;
-  /** 记忆系统数据库路径（不传则使用内存数据库） */
   memoryDbPath?: string;
-  /** 会话 ID（用于记忆隔离） */
   sessionId?: string;
 }
 
@@ -41,6 +39,28 @@ export interface TurnResult {
   narrative: string;
   agentDetails: AgentResponse[];
   stateSnapshot: Record<string, unknown>;
+}
+
+export interface ParsedInventoryChange {
+  item: string;
+  action: string;
+  quantity: number;
+  description?: string;
+}
+
+export interface ParsedQuestUpdate {
+  questId: string;
+  title: string;
+  status: string;
+  description?: string;
+}
+
+export interface ParsedStateChange {
+  locationChange?: { name: string; description: string };
+  timeAdvanceMinutes?: number;
+  environmentChange?: Record<string, unknown>;
+  inventoryChange?: ParsedInventoryChange | ParsedInventoryChange[];
+  questUpdate?: ParsedQuestUpdate | ParsedQuestUpdate[];
 }
 
 export class GameEngine {
@@ -84,7 +104,7 @@ export class GameEngine {
       eventBus: this.eventBus,
       stateStore: this.stateStore,
       sceneManager: this.sceneManager,
-      getAgent: (role) => this.agents.get(role as any),
+      getAgent: (role: AgentRole) => this.agents.get(role),
       logging: typeof this.config.logging === 'boolean' ? this.config.logging : this.config.logging?.enabled || false
     });
     this.itemManager = new ItemManager({
@@ -150,12 +170,14 @@ export class GameEngine {
     if (worldKeeper && 'generateWorldTick' in worldKeeper) {
       try {
         const context = this.stateStore.getContextSummary();
-        const tickDescription = await (worldKeeper as any).generateWorldTick(context);
+        const tickDescription = await (worldKeeper as WorldKeeper).generateWorldTick(context);
         if (tickDescription) {
           this.eventBus.emit('world:tick_description', { description: tickDescription }, 'world-keeper');
         }
       } catch (err) {
-        console.error('[AutoWorldTick] World Keeper 生成演化描述失败:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error('[AutoWorldTick] World Keeper 生成演化描述失败:', errorMessage);
+        this.eventBus.emit(GameEvents.AGENT_ERROR, { error: errorMessage, agent: 'world-keeper', context: 'auto_tick' }, 'engine');
       }
     }
 
@@ -231,28 +253,28 @@ export class GameEngine {
     // 物品事件处理
     this.eventBus.on(GameEvents.ITEM_CREATED, (event) => {
       if (this.config.logging) {
-        const payload = event.payload as any;
+        const payload = event.payload as { item?: { name: string } };
         console.log(`[Item] 创建：${payload.item?.name}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_REWARD, (event) => {
       if (this.config.logging) {
-        const payload = event.payload as any;
+        const payload = event.payload as { item?: { name: string }; questId?: string };
         console.log(`[Item] 任务奖励：${payload.item?.name}, 任务 ID: ${payload.questId}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_DISCOVERED, (event) => {
       if (this.config.logging) {
-        const payload = event.payload as any;
+        const payload = event.payload as { item?: { name: string }; location?: string };
         console.log(`[Item] 探索发现：${payload.item?.name}, 地点：${payload.location}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_GIFT, (event) => {
       if (this.config.logging) {
-        const payload = event.payload as any;
+        const payload = event.payload as { item?: { name: string }; npcName?: string };
         console.log(`[Item] NPC 赠与：${payload.item?.name}, NPC: ${payload.npcName}`);
       }
     });
@@ -278,7 +300,7 @@ export class GameEngine {
       }
       if (parsed.inventoryChange) {
         const changes = Array.isArray(parsed.inventoryChange) ? parsed.inventoryChange : [parsed.inventoryChange];
-        changes.forEach((change: any) => {
+        changes.forEach((change: ParsedInventoryChange) => {
           if (change && change.item && change.action && change.quantity) {
             this.sceneManager.updateInventoryItem({ name: change.item, action: change.action, quantity: change.quantity, description: change.description });
           }
@@ -286,7 +308,7 @@ export class GameEngine {
       }
       if (parsed.questUpdate) {
         const updates = Array.isArray(parsed.questUpdate) ? parsed.questUpdate : [parsed.questUpdate];
-        updates.forEach((update: any) => {
+        updates.forEach((update: ParsedQuestUpdate) => {
           if (update && update.questId && update.title && update.status) {
             this.sceneManager.updateQuest({ questId: update.questId, title: update.title, status: update.status, description: update.description });
           }
@@ -384,7 +406,11 @@ export class GameEngine {
         full = payload.full;
 
         // 完成回合处理（使用 catch 处理异步错误，避免阻塞流）
-        this.finalizeTurn(actualInput, full, context).catch(err => console.error('[FinalizeTurn Error]', err));
+        this.finalizeTurn(actualInput, full, context).catch(err => {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          console.error('[FinalizeTurn Error]', errorMessage);
+          this.eventBus.emit(GameEvents.AGENT_ERROR, { error: errorMessage, context: 'finalize_turn' }, 'engine');
+        });
       }
       yield JSON.stringify(payload) + '\n';
     }
@@ -567,11 +593,11 @@ export class GameEngine {
     return this.questManager.createQuest(quest);
   }
 
-  async generateQuestFromEvent(eventType: string, context: any) {
+  async generateQuestFromEvent(eventType: string, context: Record<string, unknown>) {
     return this.questManager.generateQuestFromEvent(eventType, context);
   }
 
-  async generateRandomQuest(context: any = {}) {
+  async generateRandomQuest(context: Record<string, unknown> = {}) {
     return this.questManager.generateRandomQuest(context);
   }
 
@@ -587,31 +613,31 @@ export class GameEngine {
    * @param context 行为上下文
    * @returns 生成的任务或错误
    */
-  async triggerQuestFromPlayerAction(action: string, context: any = {}) {
+  async triggerQuestFromPlayerAction(action: string, context: Record<string, unknown> = {}) {
     return this.questManager.triggerQuestFromPlayerAction(action, context);
   }
 
-  async triggerQuestFromStory(plotId: string, context: any = {}) {
+  async triggerQuestFromStory(plotId: string, context: Record<string, unknown> = {}) {
     return this.questManager.triggerQuestFromStory(plotId, context);
   }
 
-  async triggerRandomQuest(context: any = {}) {
+  async triggerRandomQuest(context: Record<string, unknown> = {}) {
     return this.questManager.triggerRandomQuest(context);
   }
 
-  async triggerQuestFromNPCInteraction(npcId: string, playerAction: string, context: any = {}) {
+  async triggerQuestFromNPCInteraction(npcId: string, playerAction: string, context: Record<string, unknown> = {}) {
     return this.questManager.triggerQuestFromNPCInteraction(npcId, playerAction, context);
   }
 
-  async triggerQuestFromExploration(location: string, context: any = {}) {
+  async triggerQuestFromExploration(location: string, context: Record<string, unknown> = {}) {
     return this.questManager.triggerQuestFromExploration(location, context);
   }
 
-  async triggerQuestFromCombat(enemyType: string, context: any = {}) {
+  async triggerQuestFromCombat(enemyType: string, context: Record<string, unknown> = {}) {
     return this.questManager.triggerQuestFromCombat(enemyType, context);
   }
 
-  async triggerTimedRandomQuest(probability: number = 0.1, context: any = {}) {
+  async triggerTimedRandomQuest(probability = 0.1, context: Record<string, unknown> = {}) {
     return this.questManager.triggerTimedRandomQuest(probability, context);
   }
 
@@ -621,15 +647,15 @@ export class GameEngine {
     return this.itemManager.createItem(item, addToInventory);
   }
 
-  async generateItemFromReward(context: any) {
+  async generateItemFromReward(context: Record<string, unknown>) {
     return this.itemManager.generateItemFromReward(context);
   }
 
-  async generateItemFromDiscovery(context: any) {
+  async generateItemFromDiscovery(context: Record<string, unknown>) {
     return this.itemManager.generateItemFromDiscovery(context);
   }
 
-  async generateItemFromGift(npcId: string, npcName: string, context: any) {
+  async generateItemFromGift(npcId: string, npcName: string, context: Record<string, unknown>) {
     return this.itemManager.generateItemFromGift(npcId, npcName, context);
   }
 

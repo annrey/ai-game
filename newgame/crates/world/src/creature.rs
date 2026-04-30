@@ -247,7 +247,10 @@ impl Creature {
         match self.alignment {
             CreatureAlignment::Hostile => true,
             CreatureAlignment::Predatory => {
-                self.niche.prey.contains(&other.creature_type) || other.category == CreatureCategory::Animal
+                // 掠食者攻击猎物、动物，以及人形生物（把人类视为潜在猎物）
+                self.niche.prey.contains(&other.creature_type)
+                    || other.category == CreatureCategory::Animal
+                    || other.category == CreatureCategory::Humanoid
             }
             CreatureAlignment::Territorial => {
                 self.current_location_id == other.current_location_id
@@ -257,7 +260,9 @@ impl Creature {
     }
 
     pub fn can_be_domesticated(&self) -> bool {
-        matches!(self.alignment, CreatureAlignment::Neutral | CreatureAlignment::Cautious | CreatureAlignment::Friendly)
+        // 动物类生物，只要不是 Hostile，理论上都可被驯化
+        // （包括 Neutral、Cautious、Friendly，以及 Predatory 如狼、熊等）
+        !matches!(self.alignment, CreatureAlignment::Hostile | CreatureAlignment::Territorial)
             && self.category == CreatureCategory::Animal
     }
 

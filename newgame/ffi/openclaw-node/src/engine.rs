@@ -4,77 +4,57 @@ use napi::threadsafe_function::{ThreadsafeFunction, ErrorStrategy};
 use std::sync::Arc;
 use std::path::PathBuf;
 
-use game_core::{EventBus, GameEngine, RuleEngine, StateStore, GameEvent};
-use game_core::agents::{AgentManager, BaseAgent};
-use game_core::agents::narrator::NarratorAgent;
-use game_core::agents::guide::GuideAgent;
-use game_core::providers::OllamaProvider;
-use memory::sqlite::SqliteMemoryStore;
-use memory::store::MemoryStore;
-use sqlx::sqlite::SqlitePoolOptions;
+use game_core::{EventBus, GameEvent, StateStore};
+use game_core::engine_factory::{EngineFactory, EngineFactoryConfig};
+use game_core::engine_handle::EngineHandle;
+use game_core::providers::provider_factory::{ProviderConfig, SingleProviderConfig};
 
 #[napi]
 pub struct CoreGameEngine {
-    engine: Arc<GameEngine>,
+    engine: EngineHandle,
     event_bus: Arc<EventBus>,
     state_store: Arc<StateStore>,
 }
 
 #[napi]
 impl CoreGameEngine {
-    /// Initialize the Rust GameEngine
+    /// Initialize the Rust GameEngine via the unified EngineFactory.
+    /// Bevy / Tauri / Server / FFI 都走这个路径，保证同源。
     #[napi(factory)]
     pub async fn create(ollama_url: Option<String>, save_dir: String, db_url: String) -> Result<Self> {
-        let event_bus = EventBus::new(1024);
-        let state_store = StateStore::new(PathBuf::from(save_dir));
-        
-        let mut rule_engine = RuleEngine::new();
-        rule_engine.register_rule(Box::new(game_core::rules::movement::MovementRule));
-        rule_engine.register_rule(Box::new(game_core::rules::economy::EconomyRule));
-        rule_engine.register_rule(Box::new(game_core::rules::relationship::RelationshipRule));
-        rule_engine.register_rule(Box::new(game_core::rules::schedule::ScheduleRule));
-        rule_engine.register_rule(Box::new(game_core::rules::quest::QuestRule));
-        rule_engine.register_rule(Box::new(game_core::rules::item::ItemRule));
+        let mut provider_cfg = ProviderConfig::default();
+        provider_cfg.default_provider = "ollama".to_string();
+        provider_cfg.ollama = SingleProviderConfig {
+            enabled: true,
+            base_url: Some(ollama_url.unwrap_or_else(|| "http://localhost:11434".to_string())),
+            api_key: None,
+            model: Some("llama3".to_string()),
+        };
 
-        let provider = Arc::new(OllamaProvider::new("llama3".to_string(), ollama_url));
-        
-        // Setup Sub-Agents
-        let mut agent_manager = AgentManager::new();
-        let guide_agent = Arc::new(GuideAgent::new(provider.clone()));
-        agent_manager.register("guide", guide_agent);
-        let agent_manager_arc = Arc::new(agent_manager);
+        let bundle = EngineFactory::build(EngineFactoryConfig {
+            save_dir: PathBuf::from(save_dir),
+            memory_db_url: Some(db_url),
+            provider_config: Some(provider_cfg),
+            event_bus_capacity: 1024,
+            register_default_rules: true,
+        })
+        .await
+        .map_err(|e| Error::new(Status::GenericFailure, format!("EngineFactory build failed: {}", e)))?;
 
-        let narrator = NarratorAgent::new(provider, agent_manager_arc);
-
-        // Setup Memory Store
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect(&db_url)
-            .await
-            .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to connect to SQLite: {}", e)))?;
-        
-        let memory_store = SqliteMemoryStore::new(pool);
-        memory_store.init().await.map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-
-        let engine = GameEngine::new(
-            event_bus.clone(),
-            state_store.clone(),
-            rule_engine,
-            narrator,
-            Arc::new(memory_store),
-        );
+        let event_bus = bundle.handle.event_bus();
+        let state_store = bundle.handle.state_store();
 
         Ok(Self {
-            engine: Arc::new(engine),
-            event_bus: Arc::new(event_bus),
-            state_store: Arc::new(state_store),
+            engine: bundle.handle,
+            event_bus,
+            state_store,
         })
     }
 
     /// Starts the engine's main event loop in the background
     #[napi]
     pub fn start(&self) {
-        let engine_clone = Arc::clone(&self.engine);
+        let engine_clone = self.engine.clone();
         tokio::spawn(async move {
             engine_clone.start().await;
         });

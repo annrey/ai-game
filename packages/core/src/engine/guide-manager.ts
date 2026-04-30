@@ -364,29 +364,25 @@ export class GuideManager {
     return this.progress.isCompleted;
   }
 
-  /**
-   * 保存进度到状态存储
-   */
+  /** 保存进度到状态存储 */
   private saveProgress(): void {
     if (!this.stateStore) {
       return;
     }
 
     try {
-      // 将引导进度保存到状态存储中
-      // 注意：这里使用自定义的持久化方式，因为 state-store 可能没有直接的引导进度字段
       const state = this.stateStore.getState();
       (state as Record<string, unknown>).__guideProgress = this.progress;
       (state as Record<string, unknown>).__guideConfig = this.config;
       (state as Record<string, unknown>).__guideStepData = this.currentStepData;
     } catch (error) {
-      console.error('保存引导进度失败:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('保存引导进度失败:', errorMessage);
+      this.emitEvent('guide_error', { error: errorMessage, context: 'save_progress' });
     }
   }
 
-  /**
-   * 从状态存储加载进度
-   */
+  /** 从状态存储加载进度 */
   private loadProgress(): void {
     if (!this.stateStore) {
       return;
@@ -410,7 +406,9 @@ export class GuideManager {
         this.currentStepData = savedStepData;
       }
     } catch (error) {
-      console.error('加载引导进度失败:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('加载引导进度失败:', errorMessage);
+      this.emitEvent('guide_error', { error: errorMessage, context: 'load_progress' });
     }
   }
 
@@ -501,10 +499,10 @@ export class GuideManager {
   /**
    * 发出事件
    */
-  private emitEvent(type: GuideEvent['type'], payload: GuideEvent['payload']): void {
+   private emitEvent(type: GuideEvent['type'] | 'guide_error', payload: GuideEvent['payload'] | Record<string, unknown>): void {
     const event: GuideEvent = {
-      type,
-      payload,
+      type: type as GuideEvent['type'],
+      payload: payload as GuideEvent['payload'],
       timestamp: Date.now(),
     };
 

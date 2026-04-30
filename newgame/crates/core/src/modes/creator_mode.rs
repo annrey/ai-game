@@ -128,6 +128,7 @@ impl CreatorMode {
     }
 
     /// 构建规则书文本
+    #[allow(dead_code)]
     fn build_rule_book(&self) -> String {
         let mut sections = Vec::new();
 
@@ -385,7 +386,7 @@ impl GameMode for CreatorMode {
                 energy: 40,
                 max_energy: 100,
             },
-            scene_type: "custom".to_string(),
+            scene_type: crate::state_store::SceneType::Custom,
         };
 
         let mut intro = format!(

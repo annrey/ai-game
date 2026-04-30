@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
-use std::sync::{Arc, Mutex};
 
 mod game_state;
 mod ui;
@@ -31,13 +30,15 @@ fn main() {
         .add_systems(Update, (
             handle_player_input,
             drain_snapshots,
+            sync_scene_visual_from_game_state,
+            handle_keyboard_shortcuts,
         ))
         .run();
 }
 
 #[derive(Resource, Default)]
 struct GameStateResource {
-    state: Arc<Mutex<GameState>>,
+    state: GameState,
 }
 
 #[derive(Resource)]
@@ -54,7 +55,6 @@ impl Default for EngineBridgeResource {
 
 fn setup_game(
     mut commands: Commands,
-    mut game_state: ResMut<GameStateResource>,
     engine_bridge: ResMut<EngineBridgeResource>,
 ) {
     commands.spawn(Camera2d::default());
@@ -62,10 +62,7 @@ fn setup_game(
     // Request initial snapshot from engine
     let _ = engine_bridge.bridge.cmd_tx.send(EngineCommand::RequestSnapshot);
 
-    // Start with default game state
-    let state = GameState::new();
-    game_state.state = Arc::new(Mutex::new(state));
-
+    // GameStateResource::Default 已自动初始化 state
     setup_initial_scene(&mut commands);
 }
 
@@ -86,13 +83,11 @@ struct SceneBackground;
 
 fn handle_player_input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    game_state: ResMut<GameStateResource>,
+    game_state: Res<GameStateResource>,
     engine_bridge: ResMut<EngineBridgeResource>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        let state = game_state.state.lock().unwrap();
-        if !state.is_processing {
-            drop(state);
+        if !game_state.state.is_processing {
             let _ = engine_bridge.bridge.cmd_tx.send(EngineCommand::PlayerInput(
                 "继续探索".to_string()
             ));
@@ -101,42 +96,43 @@ fn handle_player_input(
 }
 
 fn drain_snapshots(
-    game_state: ResMut<GameStateResource>,
+    mut game_state: ResMut<GameStateResource>,
     engine_bridge: ResMut<EngineBridgeResource>,
 ) {
     // Drain all available snapshots from the channel
     while let Ok(snapshot) = engine_bridge.bridge.snap_rx.try_recv() {
-        let mut state = game_state.state.lock().unwrap();
-
         // Update processing state
-        state.is_processing = snapshot.pending;
+        game_state.state.is_processing = snapshot.pending;
 
         // Update narrative if there's new content
         if let Some(narrative) = snapshot.narrative_delta {
-            state.add_narrative(narrative.content, narrative.is_player);
+            game_state.state.add_narrative(narrative.content, narrative.is_player);
         }
 
         // Update world state from snapshot
-        state.location_name = snapshot.world.location_name.clone();
-        state.chapter = snapshot.world.chapter.clone();
-        state.turn_count = snapshot.world.turn_count as i32;
-        state.health = snapshot.world.health;
-        state.max_health = snapshot.world.max_health;
-        state.mana = snapshot.world.mana;
-        state.max_mana = snapshot.world.max_mana;
-        state.energy = snapshot.world.energy;
-        state.max_energy = snapshot.world.max_energy;
-        state.exploration_percent = snapshot.world.exploration_percent;
-        state.locations_discovered = snapshot.world.locations_discovered;
-        state.npcs_met = snapshot.world.npcs_met;
-        state.items_collected = snapshot.world.items_collected;
+        game_state.state.location_name = snapshot.world.location_name.clone();
+        game_state.state.chapter = snapshot.world.chapter.clone();
+        game_state.state.turn_count = snapshot.world.turn_count as i32;
+        game_state.state.scene_type = parse_scene_type(&snapshot.world.scene_type);
+        game_state.state.weather = parse_weather(&snapshot.world.weather);
+        game_state.state.game_time.time_of_day = parse_time_of_day(&snapshot.world.time_of_day);
+        game_state.state.health = snapshot.world.health;
+        game_state.state.max_health = snapshot.world.max_health;
+        game_state.state.mana = snapshot.world.mana;
+        game_state.state.max_mana = snapshot.world.max_mana;
+        game_state.state.energy = snapshot.world.energy;
+        game_state.state.max_energy = snapshot.world.max_energy;
+        game_state.state.exploration_percent = snapshot.world.exploration_percent;
+        game_state.state.locations_discovered = snapshot.world.locations_discovered;
+        game_state.state.npcs_met = snapshot.world.npcs_met;
+        game_state.state.items_collected = snapshot.world.items_collected;
 
         // Update inventory
-        state.inventory = snapshot.world.inventory.iter().map(|i| {
+        game_state.state.inventory = snapshot.world.inventory.iter().map(|i| {
             crate::game_state::InventoryItem {
                 id: i.id.clone(),
                 name: i.name.clone(),
-                item_type: crate::game_state::ItemType::Misc, // Simplified mapping
+                item_type: crate::game_state::ItemType::Misc,
                 quantity: i.quantity,
                 description: i.description.clone(),
                 icon: i.icon.clone(),
@@ -144,18 +140,18 @@ fn drain_snapshots(
         }).collect();
 
         // Update quests
-        state.quests = snapshot.world.quests.iter().map(|q| {
+        game_state.state.quests = snapshot.world.quests.iter().map(|q| {
             crate::game_state::Quest {
                 id: q.id.clone(),
                 title: q.title.clone(),
                 description: q.description.clone(),
-                status: crate::game_state::QuestStatus::Active, // Simplified mapping
+                status: crate::game_state::QuestStatus::Active,
                 objectives: vec![],
             }
         }).collect();
 
         // Update choices
-        state.choices = snapshot.world.choices.iter().map(|c| {
+        game_state.state.choices = snapshot.world.choices.iter().map(|c| {
             crate::game_state::PlayerChoice {
                 id: c.id.clone(),
                 text: c.text.clone(),
@@ -166,13 +162,111 @@ fn drain_snapshots(
         }).collect();
 
         // Update engine snapshot status
-        state.engine_snapshot.connection_status = if snapshot.last_error.is_some() {
+        game_state.state.engine_snapshot.backend = Some(match snapshot.backend {
+            game_core::BackendKind::Ollama => crate::game_state::EngineBackend::Ollama,
+            _ => crate::game_state::EngineBackend::Echo,
+        });
+        game_state.state.engine_snapshot.connection_status = if snapshot.last_error.is_some() {
             crate::game_state::ConnectionStatus::Error
+        } else if snapshot.backend == game_core::BackendKind::Echo {
+            crate::game_state::ConnectionStatus::Offline
         } else {
             crate::game_state::ConnectionStatus::Online
         };
-        if let Some(err) = snapshot.last_error {
-            state.engine_snapshot.last_error = Some(err);
+        game_state.state.engine_snapshot.last_error = snapshot.last_error;
+    }
+}
+
+fn parse_scene_type(s: &str) -> crate::game_state::SceneType {
+    match s.to_lowercase().as_str() {
+        "forest" => crate::game_state::SceneType::Forest,
+        "town" => crate::game_state::SceneType::Town,
+        "dungeon" => crate::game_state::SceneType::Dungeon,
+        "beach" => crate::game_state::SceneType::Beach,
+        "mountain" => crate::game_state::SceneType::Mountain,
+        "custom" | _ => crate::game_state::SceneType::Custom,
+    }
+}
+
+fn parse_weather(s: &str) -> crate::game_state::Weather {
+    match s.to_lowercase().as_str() {
+        "clear" => crate::game_state::Weather::Clear,
+        "rain" => crate::game_state::Weather::Rain,
+        "storm" => crate::game_state::Weather::Storm,
+        "snow" => crate::game_state::Weather::Snow,
+        "fog" => crate::game_state::Weather::Fog,
+        "cloudy" | _ => crate::game_state::Weather::Cloudy,
+    }
+}
+
+fn parse_time_of_day(s: &str) -> crate::game_state::TimeOfDay {
+    match s.to_lowercase().as_str() {
+        "dawn" => crate::game_state::TimeOfDay::Dawn,
+        "morning" => crate::game_state::TimeOfDay::Morning,
+        "noon" => crate::game_state::TimeOfDay::Noon,
+        "afternoon" => crate::game_state::TimeOfDay::Afternoon,
+        "dusk" => crate::game_state::TimeOfDay::Dusk,
+        "night" => crate::game_state::TimeOfDay::Night,
+        "midnight" | _ => crate::game_state::TimeOfDay::Midnight,
+    }
+}
+
+/// 将 GameState 的场景/天气/时间同步到 SceneVisualState
+fn sync_scene_visual_from_game_state(
+    game_state: Res<GameStateResource>,
+    mut visual_state: ResMut<crate::visuals::SceneVisualState>,
+) {
+    // 只在状态变化时更新
+    if game_state.state.scene_type != visual_state.current_scene {
+        visual_state.current_scene = game_state.state.scene_type;
+    }
+    if game_state.state.weather != visual_state.current_weather {
+        visual_state.current_weather = game_state.state.weather;
+    }
+    if game_state.state.game_time.time_of_day != visual_state.current_time {
+        visual_state.current_time = game_state.state.game_time.time_of_day;
+    }
+}
+
+/// 处理键盘快捷键
+/// - 数字键 1-4: 选择选项
+/// - Esc: 取消/返回
+/// - Ctrl+S: 保存游戏
+fn handle_keyboard_shortcuts(
+    keyboard: Res<bevy::prelude::ButtonInput<bevy::prelude::KeyCode>>,
+    game_state: Res<GameStateResource>,
+    engine_bridge: ResMut<EngineBridgeResource>,
+) {
+    use bevy::prelude::KeyCode;
+
+    let choices: Vec<_> = game_state.state.choices.iter().take(4).cloned().collect();
+
+    // 数字键 1-4 选择选项
+    for (i, choice) in choices.iter().enumerate() {
+        let key = match i {
+            0 => KeyCode::Digit1,
+            1 => KeyCode::Digit2,
+            2 => KeyCode::Digit3,
+            3 => KeyCode::Digit4,
+            _ => continue,
+        };
+
+        if keyboard.just_pressed(key) {
+            engine_bridge.bridge.send(runtime::EngineCommand::ChoiceSelected {
+                id: choice.id.clone(),
+                text: choice.text.clone(),
+            });
         }
+    }
+
+    // Esc 取消当前操作
+    if keyboard.just_pressed(KeyCode::Escape) {
+        // 可以发送取消命令或关闭弹窗
+    }
+
+    // Ctrl+S 保存游戏
+    if keyboard.pressed(KeyCode::ControlLeft) && keyboard.just_pressed(KeyCode::KeyS) {
+        let save_name = format!("auto_{}", chrono::Utc::now().timestamp());
+        engine_bridge.bridge.send(runtime::EngineCommand::Save(save_name));
     }
 }

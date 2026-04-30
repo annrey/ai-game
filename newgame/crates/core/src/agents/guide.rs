@@ -1,5 +1,4 @@
-use super::{AIProvider, AgentResponse, BaseAgent, Message, Role, AgentManager};
-use anyhow::Result;
+use super::{AIProvider, AgentResponse, BaseAgent, Message};
 use std::sync::Arc;
 
 pub struct GuideAgent {

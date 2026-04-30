@@ -107,7 +107,7 @@ impl GameMode for TextAdventureMode {
             current_location: "迷雾十字路口".to_string(),
             location_description: "你站在一片被阳光照亮的十字路口，四周是茂密的森林、广阔的平原和蜿蜒的小溪。".to_string(),
             player: crate::state_store::PlayerStats::default(),
-            scene_type: "forest".to_string(),
+            scene_type: crate::state_store::SceneType::Forest,
         };
 
         let intro = format!(

@@ -80,7 +80,7 @@ pub struct GameTime {
     pub time_of_day: TimeOfDay,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub enum TimeOfDay {
     #[default]
     Morning,
@@ -92,7 +92,7 @@ pub enum TimeOfDay {
     Midnight,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub enum Weather {
     #[default]
     Clear,
@@ -132,7 +132,7 @@ pub struct Quest {
     pub objectives: Vec<QuestObjective>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum QuestStatus {
     Active,
     Completed,
@@ -314,12 +314,16 @@ impl GameState {
         });
         self.current_narrative = content;
     }
-    
+
+    /// 替换 choices 列表（保留给后续 NPC 引导功能使用）
+    #[allow(dead_code)]
     pub fn update_choices(&mut self, choices: Vec<PlayerChoice>) {
         self.choices = choices;
         self.selected_choice = None;
     }
-    
+
+    /// 通过索引选择 choice（保留给键盘 1-4 快捷键路径使用）
+    #[allow(dead_code)]
     pub fn select_choice(&mut self, index: usize) -> Option<PlayerChoice> {
         if index < self.choices.len() {
             self.selected_choice = Some(index);

@@ -17,7 +17,6 @@ pub mod timeline;
 pub mod asset;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// 完整的世界定义
 #[derive(Debug, Clone, Serialize, Deserialize)]

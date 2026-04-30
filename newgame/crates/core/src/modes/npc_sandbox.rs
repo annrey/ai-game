@@ -84,7 +84,7 @@ impl GameMode for NPCSandboxMode {
             current_location: "酒馆".to_string(),
             location_description: format!("你坐在酒馆的角落，对面是{}。{}", self.npc_name, self.npc_role),
             player: crate::state_store::PlayerStats::default(),
-            scene_type: "town".to_string(),
+            scene_type: crate::state_store::SceneType::Town,
         };
 
         let intro = format!(

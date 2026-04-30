@@ -5,6 +5,8 @@ members = [
     "crates/world",
     "src-tauri",
     "src-bevy",
+    "apps/server",
+    "ffi/openclaw-node",
 ]
 resolver = "2"
 

@@ -124,7 +124,7 @@ impl GameMode for StardewValleyMode {
             current_location: self.farm_name.clone(),
             location_description: format!("你站在{}的门口，清晨的阳光洒在新翻的土地上。今天是个适合劳作的好日子。", self.farm_name),
             player: crate::state_store::PlayerStats::default(),
-            scene_type: "farm".to_string(),
+            scene_type: crate::state_store::SceneType::Custom,
         };
 
         let intro = format!(

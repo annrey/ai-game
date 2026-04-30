@@ -22,15 +22,15 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-where npm >nul 2>nul
+where pnpm >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [X] 未检测到 npm，请先安装 Node.js
+    echo [X] 未检测到 pnpm，请先安装 pnpm: npm install -g pnpm
     exit /b 1
 )
 
 if not exist "node_modules\" (
     echo [*] 安装依赖...
-    call npm install
+    call pnpm install
 )
 
 echo.
@@ -125,4 +125,4 @@ echo     如需换端口：set PORT=3005 ^& start-web.bat 或 start-web.bat 3005
 echo.
 
 set "PORT=%PORT%"
-call npm run server:watch
+call pnpm run dev:backend

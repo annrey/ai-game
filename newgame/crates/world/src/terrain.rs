@@ -430,6 +430,78 @@ impl TerrainManager {
     }
 }
 
+/// 地形类型映射到场景类型 (用于 Bevy 前端显示)
+impl TerrainType {
+    pub fn to_scene_type(&self) -> &'static str {
+        match self {
+            TerrainType::Forest | TerrainType::Jungle => "forest",
+            TerrainType::Plains | TerrainType::Hill => "town",
+            TerrainType::Cave | TerrainType::Ruins => "dungeon",
+            TerrainType::Coast | TerrainType::Lake | TerrainType::River => "beach",
+            TerrainType::Mountain | TerrainType::Volcanic => "mountain",
+            TerrainType::Desert | TerrainType::Swamp | TerrainType::Tundra => "custom",
+        }
+    }
+}
+
+/// 气候类型生成对应天气
+impl ClimateType {
+    pub fn generate_weather(&self) -> WeatherType {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        match self {
+            ClimateType::Temperate => match rng.gen_range(0..3) {
+                0 => WeatherType::Sunny,
+                1 => WeatherType::Cloudy,
+                _ => WeatherType::Rainy,
+            },
+            ClimateType::Tropical => match rng.gen_range(0..3) {
+                0 => WeatherType::Sunny,
+                1 => WeatherType::Rainy,
+                _ => WeatherType::Stormy,
+            },
+            ClimateType::Cold => match rng.gen_range(0..2) {
+                0 => WeatherType::Snowy,
+                _ => WeatherType::Cloudy,
+            },
+            // 干旱气候：2/3 晴天 + 1/3 雾 (Sunny 偏多为特色)
+            ClimateType::Arid => match rng.gen_range(0..4) {
+                0 | 1 | 2 => WeatherType::Sunny,
+                _ => WeatherType::Foggy,
+            },
+            ClimateType::Polar => WeatherType::Snowy,
+        }
+    }
+}
+
+/// 天气类型的字符串转换
+impl WeatherType {
+    /// 返回英文 key，用于前端解析 (与 Bevy parse_weather 对齐)
+    pub fn to_key(&self) -> &'static str {
+        match self {
+            WeatherType::Sunny => "clear",
+            WeatherType::Rainy => "rain",
+            WeatherType::Cloudy => "cloudy",
+            WeatherType::Foggy => "fog",
+            WeatherType::Stormy => "storm",
+            WeatherType::Snowy => "snow",
+        }
+    }
+
+    /// 返回中文显示字符串，用于 UI 显示
+    pub fn to_string_zh(&self) -> &'static str {
+        match self {
+            WeatherType::Sunny => "晴朗",
+            WeatherType::Rainy => "下雨",
+            WeatherType::Cloudy => "多云",
+            WeatherType::Foggy => "雾",
+            WeatherType::Stormy => "暴风雨",
+            WeatherType::Snowy => "下雪",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,5 +530,26 @@ mod tests {
         
         let cost = manager.calculate_move_cost("loc_plains", "loc_mountain");
         assert!((cost - 1.6).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_terrain_to_scene_mapping() {
+        assert_eq!(TerrainType::Forest.to_scene_type(), "forest");
+        assert_eq!(TerrainType::Plains.to_scene_type(), "town");
+        assert_eq!(TerrainType::Cave.to_scene_type(), "dungeon");
+        assert_eq!(TerrainType::Coast.to_scene_type(), "beach");
+        assert_eq!(TerrainType::Mountain.to_scene_type(), "mountain");
+        assert_eq!(TerrainType::Desert.to_scene_type(), "custom");
+    }
+
+    #[test]
+    fn test_climate_generates_weather() {
+        // 极地气候应该总是下雪
+        let polar_weather = ClimateType::Polar.generate_weather();
+        assert_eq!(polar_weather, WeatherType::Snowy);
+        
+        // 干旱气候应该生成晴天或雾
+        let arid_weather = ClimateType::Arid.generate_weather();
+        assert!(matches!(arid_weather, WeatherType::Sunny | WeatherType::Foggy));
     }
 }

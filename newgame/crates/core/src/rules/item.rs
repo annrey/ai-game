@@ -31,13 +31,12 @@ impl Rule for ItemRule {
         let action = event.payload["action"].as_str().unwrap_or("");
         
         state.mutate(|world| {
-            // Ensure inventory exists
             let mut inventory = world.variables["inventory"].clone();
             if !inventory.is_array() {
                 inventory = serde_json::json!([]);
             }
 
-            let inv_array = inventory.as_array_mut().unwrap();
+            let inv_array = inventory.as_array_mut().expect("just ensured inventory is an array");
 
             match action {
                 "add" => {
@@ -58,7 +57,7 @@ impl Rule for ItemRule {
                             inv_array.push(serde_json::to_value(InventorySlot {
                                 item: payload.item.clone(),
                                 quantity: payload.quantity,
-                            }).unwrap());
+                            }).expect("InventorySlot serialization is infallible"));
                         }
                         println!("Item added: {}x {}", payload.quantity, payload.item.name);
                     }

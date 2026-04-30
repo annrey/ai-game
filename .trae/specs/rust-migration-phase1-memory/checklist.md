@@ -1,5 +1,0 @@
-- [x] `newgame/crates/memory/Cargo.toml` 正确包含了 `sqlx`, `tokio`, `serde` 等核心依赖。
-- [x] 定义了包含序列化派生宏的数据模型 (`MemoryEntry` 或 `MemoryEvent`)。
-- [x] 包含了处理 SQLite 错误的自定义枚举 `MemoryError`。
-- [x] `SqliteMemoryStore` 包含 `sqlx::SqlitePool` 的封装并实现了建表语句。
-- [x] 在 `newgame/crates/memory` 目录下运行 `cargo check` 无错误。

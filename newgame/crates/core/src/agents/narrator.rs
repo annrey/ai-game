@@ -1,4 +1,4 @@
-use super::{AIProvider, AgentResponse, BaseAgent, Message, Role, AgentManager};
+use super::{AIProvider, AgentResponse, BaseAgent, Message, AgentManager};
 use anyhow::Result;
 use std::sync::Arc;
 use futures_util::future::join_all;
@@ -19,9 +19,72 @@ impl NarratorAgent {
     }
 
     async fn analyze_intent(&self, player_input: &str) -> Vec<Arc<dyn BaseAgent>> {
-        // Simple fallback to all agents if intent analysis fails
-        // In a full port, this would call LLM to decide which agents to invoke
-        self.agent_manager.get_all()
+        let input_lower = player_input.to_lowercase();
+        let all_agents = self.agent_manager.get_all();
+
+        // Keyword-based intent detection
+        let relevant_agents: Vec<Arc<dyn BaseAgent>> = all_agents
+            .into_iter()
+            .filter(|agent| {
+                let name = agent.name().to_lowercase();
+                match name.as_str() {
+                    "worldkeeper" | "world_keeper" => {
+                        // Environment/location related
+                        input_lower.contains("去") ||
+                        input_lower.contains("走") ||
+                        input_lower.contains("移动") ||
+                        input_lower.contains("location") ||
+                        input_lower.contains("map") ||
+                        input_lower.contains("方向") ||
+                        input_lower.contains("哪里")
+                    }
+                    "rulearbiter" | "rule_arbiter" => {
+                        // Rules/validation related
+                        input_lower.contains("规则") ||
+                        input_lower.contains("rule") ||
+                        input_lower.contains("能") ||
+                        input_lower.contains("可以") ||
+                        input_lower.contains("允许")
+                    }
+                    "npcdirector" | "npc_director" => {
+                        // NPC interaction related
+                        input_lower.contains("说话") ||
+                        input_lower.contains("交谈") ||
+                        input_lower.contains("ask") ||
+                        input_lower.contains("talk") ||
+                        input_lower.contains("npc") ||
+                        input_lower.contains("人") ||
+                        input_lower.contains("告诉")
+                    }
+                    "dramacurator" | "drama_curator" => {
+                        // Story/plot related
+                        input_lower.contains("剧情") ||
+                        input_lower.contains("story") ||
+                        input_lower.contains("plot") ||
+                        input_lower.contains("quest") ||
+                        input_lower.contains("任务") ||
+                        input_lower.contains("故事")
+                    }
+                    "guide" => {
+                        // Help/tutorial related
+                        input_lower.contains("帮助") ||
+                        input_lower.contains("help") ||
+                        input_lower.contains("怎么") ||
+                        input_lower.contains("how") ||
+                        input_lower.contains("guide") ||
+                        input_lower.contains("向导")
+                    }
+                    _ => true, // Unknown agents are included by default
+                }
+            })
+            .collect();
+
+        // Fallback to all agents if no specific intent detected
+        if relevant_agents.is_empty() {
+            self.agent_manager.get_all()
+        } else {
+            relevant_agents
+        }
     }
 }
 

@@ -1,9 +1,64 @@
 import { EventEmitter } from 'eventemitter3';
 import { EventBus } from './event-bus.js';
-import type { GameConfig } from '@openclaw/shared-types';
+import type { GameConfig, SceneState } from '@openclaw/shared-types';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
+
+/** Rust 引擎原生模块接口 */
+interface RustEngineNative {
+  create(ollamaUrl: string, saveDir: string, dbUrl: string): RustEngineInstance;
+}
+
+/** Rust 引擎实例暴露的方法 */
+interface RustEngineInstance {
+  start(): void;
+  subscribe(callback: (eventJson: string) => void): void;
+  dispatchEvent(eventType: string, payload: string): void;
+  getState(): Promise<string>;
+  save(name: string, mode: string): Promise<string>;
+  load(saveId: string): Promise<void>;
+  listSaves(limit?: number): Promise<string>;
+  clearMemories(): Promise<void>;
+  deleteSave(saveId: string): Promise<void>;
+  getMemories(options: string): Promise<string>;
+  getMemoryCount(): Promise<number>;
+  recallMemories(query: string, options: string): Promise<string>;
+}
+
+interface MemoryManagerStub {
+  getAllMemories(options: { limit?: number; type?: string }): Promise<unknown[]>;
+  getMemoryCount(): Promise<number>;
+  recall(query: string, options: { limit?: number }): Promise<unknown[]>;
+  clearSession(): Promise<void>;
+}
+
+interface StateStoreStub {
+  getState(): Promise<SceneState>;
+}
+
+interface BridgeConstructorOptions {
+  ollamaUrl?: string;
+  config?: Partial<GameConfig>;
+  providerFactory?: unknown;
+  dataPath?: string;
+  memoryDbPath?: string;
+  sessionId?: string;
+  initialState?: Partial<SceneState>;
+}
+
+interface StreamChunkPayload {
+  content: string;
+}
+
+interface StreamDonePayload {
+  content: string;
+  full: string;
+}
+
+interface StreamErrorPayload {
+  message: string;
+}
 
 /**
  * RustGameEngineBridge - 核心引擎的 TypeScript 桥接器
@@ -12,13 +67,14 @@ const require = createRequire(import.meta.url);
  * 核心逻辑来驱动游戏。它通过 FFI 加载 openclaw-node 原生模块。
  */
 export class RustGameEngineBridge extends EventEmitter {
-  private rustEngine: any; // CoreGameEngine 实例
+  private rustEngine: RustEngineInstance | null = null;
   private isInitialized = false;
+  private initError: Error | null = null;
   private eventBus: EventBus;
   private turnCount = 0;
   private config: GameConfig;
 
-  constructor(options?: { ollamaUrl?: string, config?: any, providerFactory?: any, dataPath?: string, memoryDbPath?: string, sessionId?: string, initialState?: any }) {
+  constructor(options?: BridgeConstructorOptions) {
     super();
     this.eventBus = new EventBus();
     
@@ -41,15 +97,14 @@ export class RustGameEngineBridge extends EventEmitter {
     };
 
     try {
-      // 动态加载编译后的原生模块
       const openclawNode = require('../../../../../newgame/ffi/openclaw-node/index.js');
       const saveDir = options?.dataPath ? `${options.dataPath}/saves` : './data/saves';
       const dbUrl = options?.memoryDbPath ? `sqlite://${options.memoryDbPath}` : 'sqlite://./data/memories.db';
       this.rustEngine = openclawNode.CoreGameEngine.create(options?.ollamaUrl || 'http://localhost:11434', saveDir, dbUrl);
-      // We start it synchronously here to match TS GameEngine behavior
       this.startSync();
     } catch (error) {
-      console.warn('无法加载 Rust 引擎，请确保 openclaw-node 已构建。', error);
+      this.initError = error instanceof Error ? error : new Error(String(error));
+      console.error('[RustBridge] 无法加载 Rust 引擎，请确保 openclaw-node 已构建:', this.initError.message);
     }
   }
 
@@ -59,19 +114,31 @@ export class RustGameEngineBridge extends EventEmitter {
     
     this.rustEngine.start();
     
-    // 将 Rust 事件桥接到 TS EventEmitter 和内部 EventBus
     this.rustEngine.subscribe((eventJson: string) => {
       try {
         const event = JSON.parse(eventJson);
-        // 触发本地 EventEmitter 事件
         this.emit(event.event_type, event.payload, event);
-        // 同时也分发到 EventBus，确保核心组件的监听逻辑生效
         this.eventBus.emit(event.event_type, event.payload, event.source || 'rust');
-        // 全局日志分发
         this.emit('*', event);
       } catch (e) {
-        console.error('解析 Rust 事件失败', e);
+        const err = e instanceof Error ? e : new Error(String(e));
+        console.error('[RustBridge] 解析 Rust 事件失败:', err.message);
+        this.emit('bridge:parse_error', { raw: eventJson, error: err.message });
       }
+    });
+
+    this.isInitialized = true;
+  }
+
+  /** 验证引擎是否可用，不可用时抛出存储的初始化错误 */
+  private ensureInitialized(): void {
+    if (!this.isInitialized) {
+      if (this.initError) {
+        throw new Error(`引擎初始化失败: ${this.initError.message}`);
+      }
+      throw new Error('引擎未启动');
+    }
+  }
     });
 
     this.isInitialized = true;
@@ -93,18 +160,18 @@ export class RustGameEngineBridge extends EventEmitter {
   }
 
   /** 处理一回合输入（非流式） */
-  public async processTurn(input: string): Promise<{ narrative: string; stateSnapshot: any }> {
-    if (!this.isInitialized) throw new Error('引擎未启动');
+  public async processTurn(input: string): Promise<{ narrative: string; stateSnapshot: SceneState }> {
+    this.ensureInitialized();
 
     this.turnCount++;
-    this.rustEngine.dispatchEvent('player_input', JSON.stringify({ text: input }));
+    this.rustEngine!.dispatchEvent('player_input', JSON.stringify({ text: input }));
 
     return new Promise((resolve) => {
-      const handler = (payload: any) => {
+      const handler = (payload: StreamDonePayload) => {
         this.off('narrative_generated', handler);
         this.getState().then(state => {
           resolve({
-            narrative: payload.content,
+            narrative: payload.content || payload.full,
             stateSnapshot: state
           });
         });
@@ -116,24 +183,23 @@ export class RustGameEngineBridge extends EventEmitter {
 
   /** 流式处理一回合输入，返回 AsyncIterable 供 server.ts 的 chunked 响应使用 */
   public async *processStreamTurn(input: string): AsyncIterable<string> {
-    if (!this.isInitialized) throw new Error('引擎未启动');
+    this.ensureInitialized();
 
     this.turnCount++;
-    this.rustEngine.dispatchEvent('player_input', JSON.stringify({ text: input }));
+    this.rustEngine!.dispatchEvent('player_input', JSON.stringify({ text: input }));
 
     const queue: string[] = [];
     let isDone = false;
     let error: Error | null = null;
 
-    // 设置流式事件监听
-    const chunkHandler = (payload: any) => {
+    const chunkHandler = (payload: StreamChunkPayload) => {
       queue.push(JSON.stringify({ type: 'chunk', content: payload.content }) + '\n');
     };
-    const doneHandler = (payload: any) => {
-      queue.push(JSON.stringify({ type: 'done', full: payload.content }) + '\n');
+    const doneHandler = (payload: StreamDonePayload) => {
+      queue.push(JSON.stringify({ type: 'done', full: payload.content || payload.full }) + '\n');
       isDone = true;
     };
-    const errorHandler = (payload: any) => {
+    const errorHandler = (payload: StreamErrorPayload) => {
       error = new Error(payload.message || 'Rust Stream Error');
       isDone = true;
     };
@@ -159,10 +225,10 @@ export class RustGameEngineBridge extends EventEmitter {
   }
 
   /** 获取当前世界状态快照 */
-  public async getState(): Promise<any> {
-    if (!this.rustEngine) return {};
+  public async getState(): Promise<SceneState> {
+    if (!this.rustEngine) return {} as SceneState;
     const stateStr = await this.rustEngine.getState();
-    return JSON.parse(stateStr);
+    return JSON.parse(stateStr) as SceneState;
   }
 
   /** 保存当前游戏到存档 */
@@ -175,20 +241,19 @@ export class RustGameEngineBridge extends EventEmitter {
   public async load(saveId: string): Promise<void> {
     if (!this.rustEngine) throw new Error('引擎未就绪');
     await this.rustEngine.load(saveId);
-    // 加载后同步回合数
     const state = await this.getState();
-    this.turnCount = state.turnCount || 0;
+    this.turnCount = (state as Record<string, unknown>).turnCount as number || 0;
   }
 
   /** 列出可用存档列表 */
-  public async listSaves(limit?: number): Promise<any[]> {
+  public async listSaves(limit?: number): Promise<Record<string, unknown>[]> {
     if (!this.rustEngine) return [];
     const savesStr = await this.rustEngine.listSaves(limit);
-    return JSON.parse(savesStr);
+    return JSON.parse(savesStr) as Record<string, unknown>[];
   }
 
   /** 初始化世界模板（用于开局） */
-  public async bootstrapWorld(input: any): Promise<any> {
+  public async bootstrapWorld(input: Record<string, unknown>): Promise<{ narrative: string; stateSnapshot: SceneState }> {
     if (!this.rustEngine) throw new Error('引擎未就绪');
     this.turnCount = 0;
     return { narrative: "世界初始化完成", stateSnapshot: await this.getState() };
@@ -211,11 +276,27 @@ export class RustGameEngineBridge extends EventEmitter {
   }
 
   /** 获取内部状态存储引擎，Mock 以满足编译 */
-  public getStateStore(): any {
+  public getStateStore(): StateStoreStub {
     return {
       getState: async () => await this.getState()
     };
   }
+
+  /** 更新规则书，当前 Rust 版本在配置中固定了，这里仅做兼容处理 */
+  public setRuleBook(_ruleBook: string): void {
+    // Rust 引擎暂不通过该方法更新规则书
+  }
+
+  /** 删除存档 */
+  public async deleteSave(saveId: string): Promise<void> {
+    if (!this.rustEngine) throw new Error('引擎未就绪');
+    await this.rustEngine.deleteSave(saveId);
+  }
+
+  /** 辅助方法：对接 Rust 端的成就系统 */
+  public getAchievements(): Record<string, unknown>[] { return []; }
+  public getUnlockedAchievementCount(): number { return 0; }
+}
 
   /** 更新规则书，当前 Rust 版本在配置中固定了，这里仅做兼容处理 */
   public setRuleBook(ruleBook: string): void {
@@ -229,29 +310,28 @@ export class RustGameEngineBridge extends EventEmitter {
   }
 
   /** 获取记忆管理器接口，对接 Rust 端的向量存储 */
-  public getMemoryManager(): any {
+  public getMemoryManager(): MemoryManagerStub {
+    const self = this;
     return {
-      getAllMemories: async (options: any) => {
-        if (!this.rustEngine) return [];
-        const resStr = await this.rustEngine.getMemories(JSON.stringify(options || {}));
-        return JSON.parse(resStr);
+      getAllMemories: async (options: { limit?: number; type?: string }) => {
+        if (!self.rustEngine) return [];
+        const resStr = await self.rustEngine.getMemories(JSON.stringify(options || {}));
+        return JSON.parse(resStr) as unknown[];
       },
       getMemoryCount: async () => {
-        return await this.rustEngine?.getMemoryCount() || 0;
+        return await self.rustEngine?.getMemoryCount() || 0;
       },
-      recall: async (query: string, options: any) => {
-        if (!this.rustEngine) return [];
-        const resStr = await this.rustEngine.recallMemories(query, JSON.stringify(options || {}));
-        return JSON.parse(resStr);
+      recall: async (query: string, options: { limit?: number }) => {
+        if (!self.rustEngine) return [];
+        const resStr = await self.rustEngine.recallMemories(query, JSON.stringify(options || {}));
+        return JSON.parse(resStr) as unknown[];
       },
       clearSession: async () => {
-        await this.rustEngine?.clearMemories();
+        await self.rustEngine?.clearMemories();
       }
     };
   }
 
-  // 桥接特定业务逻辑事件到 Rust 规则引擎
-  
   public dispatchEconomy(amount: number, reason: string) {
     this.rustEngine?.dispatchEvent('economy_transaction', JSON.stringify({ amount, reason }));
   }
@@ -268,7 +348,7 @@ export class RustGameEngineBridge extends EventEmitter {
     this.rustEngine?.dispatchEvent('time_advance', JSON.stringify({ hours, description }));
   }
 
-  public createQuest(quest: any) {
+  public createQuest(quest: Record<string, unknown>) {
     this.rustEngine?.dispatchEvent('quest_event', JSON.stringify({
       action: 'add',
       quest: quest
@@ -284,7 +364,7 @@ export class RustGameEngineBridge extends EventEmitter {
     }));
   }
 
-  public createItem(item: any, quantity: number = 1) {
+  public createItem(item: Record<string, unknown>, quantity = 1) {
     this.rustEngine?.dispatchEvent('item_event', JSON.stringify({
       action: 'add',
       item: item,
@@ -292,7 +372,7 @@ export class RustGameEngineBridge extends EventEmitter {
     }));
   }
 
-  public removeItem(itemId: string, quantity: number = 1) {
+  public removeItem(itemId: string, quantity = 1) {
     this.rustEngine?.dispatchEvent('item_event', JSON.stringify({
       action: 'remove',
       item_id: itemId,

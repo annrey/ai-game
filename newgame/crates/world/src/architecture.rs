@@ -384,6 +384,19 @@ impl SpaceManager {
         false
     }
 
+    /// 添加 occupant 到指定 space
+    pub fn add_occupant(&mut self, occupant_id: impl Into<String>, space_id: &str) -> bool {
+        let id = occupant_id.into();
+        if let Some(building) = self.space_to_building.get(space_id)
+            .and_then(|bid| self.buildings.get_mut(bid))
+        {
+            if let Some(space) = building.spaces.get_mut(space_id) {
+                return space.add_occupant(id);
+            }
+        }
+        false
+    }
+
     pub fn get_buildings_at_location(&self, location_id: &str) -> Vec<&Building> {
         self.buildings
             .values()
@@ -555,11 +568,18 @@ mod tests {
     #[test]
     fn test_occupant_movement() {
         let mut manager = SpaceManager::new();
+        // 先添加 occupant 到源空间
+        manager.add_occupant("npc_1", "tavern_main_hall");
+        assert!(manager.get_space("tavern_main_hall").unwrap().occupants.contains(&"npc_1".to_string()));
+
+        // 执行移动
         assert!(manager.move_occupant("npc_1", "tavern_main_hall", "tavern_private_room"));
-        
+
+        // 验证已从大厅移除
         let hall = manager.get_space("tavern_main_hall").unwrap();
         assert!(!hall.occupants.contains(&"npc_1".to_string()));
-        
+
+        // 验证已添加到房间
         let room = manager.get_space("tavern_private_room").unwrap();
         assert!(room.occupants.contains(&"npc_1".to_string()));
     }

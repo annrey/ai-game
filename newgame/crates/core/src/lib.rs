@@ -7,8 +7,12 @@ pub mod providers;
 pub mod rules;
 pub mod engine;
 pub mod engine_handle;
+pub mod engine_factory;
 pub mod modes;
 pub mod world_builder;
+pub mod error;
+pub mod tracing_setup;
+pub mod types;
 
 pub use models::{Quest, Item, InventorySlot, QuestStatus, ItemType};
 pub use events::GameEvent;
@@ -17,4 +21,5 @@ pub use state_store::{StateStore, WorldState};
 pub use rules::RuleEngine;
 pub use engine::GameEngine;
 pub use engine_handle::EngineHandle;
+pub use engine_factory::{BackendKind, EngineBundle, EngineFactory, EngineFactoryConfig};
 pub use modes::GameMode;

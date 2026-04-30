@@ -15,24 +15,42 @@ use tower_http::services::ServeDir;
 use futures_util::stream::Stream;
 
 use game_core::{
-    GameEngine, EventBus, RuleEngine, StateStore,
+    engine_factory::{BackendKind, EngineFactory, EngineFactoryConfig},
+    engine_handle::EngineHandle,
+    providers::provider_factory::{ProviderConfig, ProviderFactory},
+    state_store::StateStore,
 };
-use game_core::agents::{
-    narrator::NarratorAgent, guide::GuideAgent,
-    AgentManager, BaseAgent,
-};
-use game_core::providers::OllamaProvider;
-use memory::sqlite::SqliteMemoryStore;
-use memory::store::MemoryStore;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::path::PathBuf;
 
+struct GuideState {
+    is_active: bool,
+    is_completed: bool,
+    current_step: Option<String>,
+    completed_steps: Vec<String>,
+    total_steps: usize,
+}
+
+impl Default for GuideState {
+    fn default() -> Self {
+        Self {
+            is_active: false,
+            is_completed: false,
+            current_step: None,
+            completed_steps: Vec::new(),
+            total_steps: 5, // Default tutorial has 5 steps
+        }
+    }
+}
+
 struct AppState {
-    engine: Arc<GameEngine>,
+    engine: EngineHandle,
     state_store: Arc<StateStore>,
+    backend: BackendKind,
+    provider_factory: ProviderFactory,
     config: Arc<tokio::sync::RwLock<serde_json::Value>>,
     rule_book: Arc<tokio::sync::RwLock<String>>,
     session_id: Arc<tokio::sync::RwLock<String>>,
+    guide_state: Arc<tokio::sync::RwLock<GuideState>>,
 }
 
 #[tokio::main]
@@ -43,61 +61,46 @@ async fn main() -> anyhow::Result<()> {
         .allow_headers(Any);
 
     let save_dir = PathBuf::from("../../data/saves");
-    let db_url = "sqlite://../../data/memories.db";
+    let db_path = "../../data/memories.db";
+    let db_url = format!("sqlite://{}", db_path);
 
     tokio::fs::create_dir_all(&save_dir).await.ok();
-    if !std::path::Path::new("../../data/memories.db").exists() {
-        tokio::fs::write("../../data/memories.db", "").await.ok();
+    if !std::path::Path::new(db_path).exists() {
+        tokio::fs::write(db_path, "").await.ok();
     }
 
-    let event_bus = EventBus::new(1024);
-    let state_store = StateStore::new(save_dir);
+    // 统一通过 EngineFactory 构造，与 Bevy / Tauri / FFI 同源
+    let bundle = EngineFactory::build(EngineFactoryConfig {
+        save_dir,
+        memory_db_url: Some(db_url),
+        provider_config: None,
+        event_bus_capacity: 1024,
+        register_default_rules: true,
+    })
+    .await?;
 
-    let mut rule_engine = RuleEngine::new();
-    rule_engine.register_rule(Box::new(game_core::rules::movement::MovementRule));
-    rule_engine.register_rule(Box::new(game_core::rules::economy::EconomyRule));
-    rule_engine.register_rule(Box::new(game_core::rules::relationship::RelationshipRule));
-    rule_engine.register_rule(Box::new(game_core::rules::schedule::ScheduleRule));
-    rule_engine.register_rule(Box::new(game_core::rules::quest::QuestRule));
-    rule_engine.register_rule(Box::new(game_core::rules::item::ItemRule));
+    let engine = bundle.handle.clone();
+    let backend = bundle.backend;
+    let state_store = engine.state_store();
 
-    let provider = Arc::new(OllamaProvider::new(
-        "llama3".to_string(),
-        Some("http://localhost:11434".to_string()),
-    ));
+    // 创建 ProviderFactory 用于可用性检测
+    let provider_factory = ProviderFactory::new(ProviderConfig::default());
 
-    let mut agent_manager = AgentManager::new();
-    agent_manager.register("guide", Arc::new(GuideAgent::new(provider.clone())));
-
-    let narrator = NarratorAgent::new(provider, Arc::new(agent_manager));
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(db_url)
-        .await?;
-    let memory_store = SqliteMemoryStore::new(pool);
-    memory_store.init().await?;
-    let memory_store_arc: Arc<dyn MemoryStore> = Arc::new(memory_store);
-
-    let engine = GameEngine::new(
-        event_bus.clone(),
-        state_store.clone(),
-        rule_engine,
-        narrator,
-        memory_store_arc.clone(),
-    );
-
-    let engine_arc = Arc::new(engine);
-    let engine_clone = Arc::clone(&engine_arc);
-    tokio::spawn(async move {
-        engine_clone.start().await;
-    });
+    // 启动事件循环
+    {
+        let engine = engine.clone();
+        tokio::spawn(async move {
+            engine.start().await;
+        });
+    }
 
     let session_id = format!("session-{}", chrono::Utc::now().timestamp_millis());
 
     let app_state = Arc::new(AppState {
-        engine: engine_arc,
-        state_store: Arc::new(state_store),
+        engine,
+        state_store,
+        backend,
+        provider_factory,
         config: Arc::new(tokio::sync::RwLock::new(json!({
             "mode": "text-adventure",
             "maxHistoryTurns": 20,
@@ -106,9 +109,11 @@ async fn main() -> anyhow::Result<()> {
             "idleTimeout": 30,
             "memoryMaxContextChars": 4000,
             "logging": false,
+            "backend": backend.as_str(),
         }))),
         rule_book: Arc::new(tokio::sync::RwLock::new(String::new())),
         session_id: Arc::new(tokio::sync::RwLock::new(session_id)),
+        guide_state: Arc::new(tokio::sync::RwLock::new(GuideState::default())),
     });
 
     let app = Router::new()
@@ -153,26 +158,34 @@ async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let cfg = state.config.read().await.clone();
     let rule_book = state.rule_book.read().await.clone();
     let session_id = state.session_id.read().await.clone();
+    let backend = state.backend.as_str();
+
+    // 获取真实的 provider 可用性
+    let availability = state.provider_factory.check_availability().await;
+    let mut availability_map = serde_json::Map::new();
+    for item in availability {
+        availability_map.insert(item.name.clone(), json!(item.available));
+    }
 
     Json(json!({
         "success": true,
         "data": {
             "gameConfig": cfg,
+            "backend": backend,
             "providerRouting": {
-                "defaultProvider": "ollama",
+                "defaultProvider": state.provider_factory.default_provider_name(),
             },
             "runtime": {
                 "sessionId": session_id,
             },
-            "availability": {
-                "ollama": true
-            },
+            "availability": availability_map,
             "ruleBook": { "enabled": !rule_book.is_empty(), "length": rule_book.len() },
         }
     }))
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct ConfigPatch {
     mode: Option<String>,
     language: Option<String>,
@@ -213,20 +226,51 @@ async fn update_config(State(state): State<Arc<AppState>>, Json(payload): Json<C
     Json(json!({ "success": true, "data": { "gameConfig": &*cfg } }))
 }
 
-async fn get_providers() -> impl IntoResponse {
+async fn get_providers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // 获取真实的 provider 可用性
+    let availability = state.provider_factory.check_availability().await;
+    let mut availability_map = serde_json::Map::new();
+    let mut models_map = serde_json::Map::new();
+
+    for item in availability {
+        availability_map.insert(item.name.clone(), json!(item.available));
+        // 为每个可用的 provider 添加模型列表
+        if item.available {
+            let models: Vec<String> = item.models.iter().cloned().collect();
+            models_map.insert(item.name.clone(), json!(models));
+        }
+    }
+
     Json(json!({
         "success": true,
         "data": {
-            "availability": { "ollama": true },
-            "models": { "ollama": ["llama3"] }
+            "availability": availability_map,
+            "models": models_map
         }
     }))
 }
 
-async fn get_state(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+#[derive(Deserialize, Default)]
+struct StateQuery {
+    summary: Option<bool>,
+}
+
+async fn get_state(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StateQuery>,
+) -> impl IntoResponse {
     match state.state_store.get_state_json().await {
         Ok(state_json_str) => {
-            let state_val: Value = serde_json::from_str(&state_json_str).unwrap_or(json!({}));
+            let mut state_val: Value = serde_json::from_str(&state_json_str).unwrap_or(json!({}));
+
+            // 如果 summary=true，截掉 narrative_history 减少传输
+            if query.summary == Some(true) {
+                if let serde_json::Value::Object(ref mut m) = state_val {
+                    m.remove("narrative_history");
+                    m.remove("narrative"); // 同时移除当前叙事，只保留世界状态
+                }
+            }
+
             Json(json!({ "success": true, "data": state_val }))
         },
         Err(e) => Json(json!({ "success": false, "error": e.to_string() }))
@@ -302,55 +346,85 @@ struct TurnPayload {
 }
 
 async fn process_turn(State(state): State<Arc<AppState>>, Json(payload): Json<TurnPayload>) -> impl IntoResponse {
-    let event = game_core::GameEvent {
-        id: uuid::Uuid::new_v4().to_string(),
-        event_type: "player_input".to_string(),
-        payload: json!({ "text": payload.input }),
-        timestamp: chrono::Utc::now().timestamp_millis(),
-    };
+    // 订阅事件总线（要求订阅发生在 dispatch 之前）
+    let mut event_rx = state.engine.event_bus().subscribe();
 
-    state.state_store.mutate(|s| {
-        s.turn_count += 1;
-    }).await;
+    state.state_store.mutate(|s| { s.turn_count += 1; }).await;
+    state.engine.dispatch_player_input(&payload.input).await;
 
-    // Publish event via a cloned event bus from state_store mutation workaround
-    // Since event_bus is private, we simulate by not publishing and rely on direct processing
-    // In a real implementation, GameEngine should expose a publish method.
+    // 等待下一个 narrative_generated（限时 35s，超过则返回当前状态快照作为兑底）
+    let narrative_event = tokio::time::timeout(Duration::from_secs(35), async {
+        loop {
+            match event_rx.recv().await {
+                Ok(event) if event.event_type == "narrative_generated" => return Some(event),
+                Ok(_) => continue,
+                Err(_) => return None,
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten();
+
+    let narrative_text = narrative_event
+        .as_ref()
+        .and_then(|e| e.payload.get("content").and_then(|c| c.as_str()).map(String::from))
+        .unwrap_or_else(|| "说书人沉思中……".to_string());
+
+    let state_snapshot: Value = state.state_store.get_state_json().await
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(json!({}));
 
     Json(json!({
         "success": true,
         "data": {
-            "narrative": format!("你做了: {}", payload.input),
-            "stateSnapshot": serde_json::from_str::<Value>(&state.state_store.get_state_json().await.unwrap()).unwrap()
+            "narrative": narrative_text,
+            "backend": state.backend.as_str(),
+            "stateSnapshot": state_snapshot,
         }
     }))
 }
 
 async fn process_turn_stream(State(state): State<Arc<AppState>>, Json(payload): Json<TurnPayload>) -> impl IntoResponse {
-    let input = payload.input.clone();
-    let state_store = Arc::clone(&state.state_store);
+    // 订阅事件总线后再发送玩家输入，以免错过事件
+    let event_rx = state.engine.event_bus().subscribe();
+    state.state_store.mutate(|s| { s.turn_count += 1; }).await;
+    state.engine.dispatch_player_input(&payload.input).await;
 
-    let stream = futures_util::stream::unfold(0, move |i| {
-        let state_store = Arc::clone(&state_store);
-        let input = input.clone();
-        async move {
-            if i == 0 {
-                state_store.mutate(|s| {
-                    s.turn_count += 1;
-                }).await;
-            }
-            let narrative = format!("你做了: {}", input);
-            let chunks: Vec<char> = narrative.chars().collect();
-            if i >= chunks.len() {
+    let stream = futures_util::stream::unfold(
+        (event_rx, false, std::time::Instant::now()),
+        move |(mut rx, finished, start)| async move {
+            // 总限时 35s，防止 narrator 总是不返回
+            if finished || start.elapsed() > Duration::from_secs(35) {
                 return None;
             }
-            let end = (i + 3).min(chunks.len());
-            let s: String = chunks[i..end].iter().collect();
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let event = axum::response::sse::Event::default().data(s);
-            Some((Ok::<_, std::convert::Infallible>(event), end))
-        }
-    });
+            match tokio::time::timeout(Duration::from_secs(2), rx.recv()).await {
+                Ok(Ok(event)) => {
+                    let event_type = event.event_type.clone();
+                    let event_data = serde_json::to_string(&event.payload)
+                        .unwrap_or_else(|_| "{}".to_string());
+                    let sse = axum::response::sse::Event::default()
+                        .event(event_type.clone())
+                        .data(event_data);
+                    let is_done = event_type == "narrative_generated";
+                    Some((
+                        Ok::<_, std::convert::Infallible>(sse),
+                        (rx, is_done, start),
+                    ))
+                }
+                Ok(Err(_)) | Err(_) => {
+                    // 心跳保活
+                    let sse = axum::response::sse::Event::default()
+                        .event("heartbeat")
+                        .data(json!({
+                            "ts": chrono::Utc::now().timestamp_millis()
+                        }).to_string());
+                    Some((Ok(sse), (rx, false, start)))
+                }
+            }
+        },
+    );
 
     Sse::new(stream)
 }
@@ -425,18 +499,36 @@ async fn clear_memories(State(state): State<Arc<AppState>>) -> impl IntoResponse
 
 // ==================== Guide ====================
 
-async fn get_guide_progress(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn get_guide_progress(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let guide = state.guide_state.read().await;
+    let progress = if guide.total_steps > 0 {
+        (guide.completed_steps.len() as f32 / guide.total_steps as f32 * 100.0) as i32
+    } else {
+        0
+    };
+
     Json(json!({
         "success": true,
         "data": {
-            "isActive": false,
-            "isCompleted": false,
-            "progress": 0,
-            "currentStep": null,
-            "completedStepsCount": 0,
-            "totalStepsCount": 0,
+            "isActive": guide.is_active,
+            "isCompleted": guide.is_completed,
+            "progress": progress,
+            "currentStep": guide.current_step.as_ref().map(|id| json!({ "id": id, "title": get_step_title(id), "description": "" })),
+            "completedStepsCount": guide.completed_steps.len(),
+            "totalStepsCount": guide.total_steps,
         }
     }))
+}
+
+fn get_step_title(step_id: &str) -> String {
+    match step_id {
+        "intro" => "游戏介绍".to_string(),
+        "character_creation" => "创建角色".to_string(),
+        "first_move" => "第一次行动".to_string(),
+        "combat_tutorial" => "战斗教学".to_string(),
+        "advanced_tips" => "高级技巧".to_string(),
+        _ => "步骤".to_string(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -444,30 +536,77 @@ struct StartStepPayload {
     step_id: String,
 }
 
-async fn start_guide_step(State(_state): State<Arc<AppState>>, Json(payload): Json<StartStepPayload>) -> impl IntoResponse {
+async fn start_guide_step(State(state): State<Arc<AppState>>, Json(payload): Json<StartStepPayload>) -> impl IntoResponse {
+    let mut guide = state.guide_state.write().await;
+    guide.is_active = true;
+    guide.current_step = Some(payload.step_id.clone());
+
+    let progress = if guide.total_steps > 0 {
+        (guide.completed_steps.len() as f32 / guide.total_steps as f32 * 100.0) as i32
+    } else {
+        0
+    };
+
     Json(json!({
         "success": true,
         "data": {
             "isActive": true,
-            "currentStep": { "id": payload.step_id, "title": "步骤", "description": "" },
-            "progress": 0,
+            "currentStep": { "id": payload.step_id, "title": get_step_title(&payload.step_id), "description": "" },
+            "progress": progress,
         }
     }))
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct CompleteStepPayload {
     #[serde(default)]
     data: Option<Value>,
 }
 
-async fn complete_guide_step(State(_state): State<Arc<AppState>>, Json(_payload): Json<CompleteStepPayload>) -> impl IntoResponse {
+async fn complete_guide_step(State(state): State<Arc<AppState>>, Json(_payload): Json<CompleteStepPayload>) -> impl IntoResponse {
+    let mut guide = state.guide_state.write().await;
+
+    // Clone current_step first to avoid borrow issues
+    let current = guide.current_step.clone();
+    if let Some(ref step) = current {
+        if !guide.completed_steps.contains(step) {
+            guide.completed_steps.push(step.clone());
+        }
+    }
+
+    let progress = if guide.total_steps > 0 {
+        let p = (guide.completed_steps.len() as f32 / guide.total_steps as f32 * 100.0) as i32;
+        if p >= 100 {
+            guide.is_completed = true;
+            guide.is_active = false;
+        }
+        p
+    } else {
+        0
+    };
+
+    // Clone completed_steps to avoid borrow issues
+    let completed = guide.completed_steps.clone();
+    let is_completed = guide.is_completed;
+    drop(guide); // Release the write lock
+
+    // Determine next step
+    let next_step = if is_completed {
+        None
+    } else {
+        let all_steps = vec!["intro", "character_creation", "first_move", "combat_tutorial", "advanced_tips"];
+        all_steps.into_iter()
+            .find(|s| !completed.contains(&s.to_string()))
+            .map(|s| json!({ "id": s, "title": get_step_title(s), "description": "" }))
+    };
+
     Json(json!({
         "success": true,
         "data": {
-            "isCompleted": false,
-            "progress": 50,
-            "nextStep": null,
+            "isCompleted": is_completed,
+            "progress": progress,
+            "nextStep": next_step,
         }
     }))
 }
@@ -478,13 +617,30 @@ struct GuideChatPayload {
 }
 
 async fn guide_chat(State(state): State<Arc<AppState>>, Json(payload): Json<GuideChatPayload>) -> impl IntoResponse {
-    let state_json = state.state_store.get_state_json().await.unwrap_or_default();
-    // GuideAgent is not directly accessible from GameEngine in current core version,
-    // so we return a placeholder response.
-    Json(json!({
-        "success": true,
-        "data": { "response": format!("向导收到消息: {}", payload.message) }
-    }))
+    // Try to dispatch to guide agent through the engine
+    match state.engine.dispatch_to_agent("guide", &payload.message).await {
+        Ok(response) => {
+            Json(json!({
+                "success": true,
+                "data": { "response": response }
+            }))
+        }
+        Err(e) => {
+            // Fallback to local response if guide agent not available
+            let guide = state.guide_state.read().await;
+            let fallback = if guide.is_active {
+                format!("向导 [{}]: 我正在这里帮助你。你问的是 '{}'", guide.current_step.as_ref().unwrap_or(&"general".to_string()), payload.message)
+            } else {
+                format!("向导: 欢迎来到游戏！你可以随时向我提问。你说的是 '{}'", payload.message)
+            };
+
+            Json(json!({
+                "success": true,
+                "data": { "response": fallback },
+                "note": format!("GuideAgent not available: {}", e)
+            }))
+        }
+    }
 }
 
 // ==================== Chain of Thought ====================
@@ -680,4 +836,61 @@ async fn health_check() -> impl IntoResponse {
         "status": "ok",
         "timestamp": chrono::Utc::now().to_rfc3339(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_guide_state_default() {
+        let state = GuideState::default();
+        assert!(!state.is_active);
+        assert!(!state.is_completed);
+        assert_eq!(state.current_step, None);
+        assert_eq!(state.total_steps, 5);
+        assert_eq!(state.completed_steps.len(), 0);
+    }
+
+    #[test]
+    fn test_guide_state_mutation() {
+        let mut state = GuideState::default();
+        state.is_active = true;
+        state.current_step = Some("basic-tutorial".to_string());
+        state.completed_steps.push("ai-config".to_string());
+
+        assert!(state.is_active);
+        assert_eq!(state.current_step, Some("basic-tutorial".to_string()));
+        assert_eq!(state.completed_steps.len(), 1);
+    }
+
+    mod request_schemas {
+        use super::*;
+
+        #[derive(Deserialize)]
+        struct TurnRequest {
+            input: String,
+        }
+
+        #[test]
+        fn test_turn_request_valid() {
+            let json = serde_json::json!({"input": "go north"});
+            let req: TurnRequest = serde_json::from_value(json).unwrap();
+            assert_eq!(req.input, "go north");
+        }
+
+        #[test]
+        fn test_turn_request_rejects_missing_input() {
+            let json = serde_json::json!({});
+            let result = serde_json::from_value::<TurnRequest>(json);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_turn_request_rejects_wrong_type() {
+            let json = serde_json::json!({"input": 123});
+            let result = serde_json::from_value::<TurnRequest>(json);
+            assert!(result.is_err());
+        }
+    }
 }

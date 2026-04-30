@@ -23,14 +23,14 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  echo "✗ 未检测到 npm，请先安装 Node.js"
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "✗ 未检测到 pnpm，请先安装 pnpm: npm install -g pnpm"
   exit 1
 fi
 
 if [ ! -d "node_modules" ]; then
   echo "• 安装依赖..."
-  npm install
+  pnpm install
 fi
 
 echo ""
@@ -131,4 +131,4 @@ echo "• 启动 Web 服务：http://localhost:${PORT}"
 echo "  如需换端口：PORT=3005 ./start-web.sh 或 ./start-web.sh 3005"
 echo ""
 
-PORT="${PORT}" npm run server:watch
+PORT="${PORT}" pnpm run dev:backend

@@ -8,6 +8,7 @@ use serde_json::json;
 /// AI 作为对手或队友参与策略对抗。
 pub struct AIBattleMode {
     opponent_name: String,
+    #[allow(dead_code)]
     opponent_health: i32,
 }
 
@@ -102,7 +103,7 @@ impl GameMode for AIBattleMode {
                 energy: 40,
                 max_energy: 100,
             },
-            scene_type: "dungeon".to_string(),
+            scene_type: crate::state_store::SceneType::Dungeon,
         };
 
         let intro = r#"【AI 对战模式】

@@ -3,13 +3,15 @@
  * 提供静态文件服务和游戏 API
  */
 
-import { loadTestConfig, RustGameEngineBridge as GameEngine, ProviderFactory, printLocalModelGuide, SERVER, LIMITS, HISTORY, MEMORY, GuideManager, GuideAgent, ExtensionLoader, createTextAdventure, createAIBattle, createNPCSandbox, createChatRoleplay, createStardewValley, StardewTemplates } from '@openclaw/core';
+import { RustGameEngineBridge as GameEngine, ProviderFactory, printLocalModelGuide, SERVER, LIMITS, HISTORY, MEMORY, GuideManager, GuideAgent, ExtensionLoader, createTextAdventure, createAIBattle, createNPCSandbox, createChatRoleplay, createStardewValley, StardewTemplates } from '@openclaw/core';
 import type { ProviderFactoryConfig } from '@openclaw/core';
 import type { GameConfig, GameMode, GuideStepId } from '@openclaw/shared-types';
+import dotenv from 'dotenv';
 
-loadTestConfig();
+// 加载环境变量（仅加载 .env，不使用测试配置）
+dotenv.config();
 
-// 调试：打印环境变量
+// 调试：打印环境变量（仅在开发环境）
 console.log('🔧 环境变量检查:');
 console.log('  DEFAULT_PROVIDER:', process.env.DEFAULT_PROVIDER);
 console.log('  OLLAMA_HOST:', process.env.OLLAMA_HOST);
@@ -38,7 +40,10 @@ if (!fs.existsSync(path.dirname(dataPath))) {
 if (!fs.existsSync(path.dirname(memoryDbPath))) {
   fs.mkdirSync(path.dirname(memoryDbPath), { recursive: true });
 }
-const previewModelDir = process.env.PIXEL_MODEL_DIR || '/Users/chengyongwei/Documents/326_ckpt_SD_XL';
+const previewModelDir = process.env.PIXEL_MODEL_DIR || '';
+if (!previewModelDir && !process.env.UI_ONLY) {
+  console.warn('⚠️ PIXEL_MODEL_DIR 未设置，预览生成功能将不可用');
+}
 const previewOutputPath = path.join(__dirname, '../ui/generated/latest-preview.png');
 const previewCoverPath = path.join(previewModelDir, '_cover_images_/cover_image.png');
 const previewPython = process.env.PREVIEW_PYTHON || path.join(process.cwd(), '.sdxl-venv/bin/python3');
@@ -49,8 +54,33 @@ let providerConfig: ProviderFactoryConfig;
 let providerFactory: ProviderFactory;
 let engine: GameEngine;
 
+// 服务器就绪状态
+const serverState = {
+  isReady: false,
+  initError: null as Error | null,
+  startTime: Date.now(),
+};
+
 // 检测到的本地模型服务信息
 let detectedServiceInfo: { name: string; endpoint: string; type: string } | null = null;
+
+// 结构化日志工具
+const logger = {
+  info: (message: string, meta?: Record<string, unknown>) => {
+    console.log(`[${new Date().toISOString()}] INFO: ${message}`, meta ? JSON.stringify(meta) : '');
+  },
+  error: (message: string, error?: Error, meta?: Record<string, unknown>) => {
+    console.error(`[${new Date().toISOString()}] ERROR: ${message}`, error?.message || '', meta ? JSON.stringify(meta) : '');
+  },
+  warn: (message: string, meta?: Record<string, unknown>) => {
+    console.warn(`[${new Date().toISOString()}] WARN: ${message}`, meta ? JSON.stringify(meta) : '');
+  },
+  debug: (message: string, meta?: Record<string, unknown>) => {
+    if (process.env.LOG_LEVEL === 'debug') {
+      console.log(`[${new Date().toISOString()}] DEBUG: ${message}`, meta ? JSON.stringify(meta) : '');
+    }
+  },
+};
 
 /**
  * 初始化 Provider 配置
@@ -182,7 +212,7 @@ function rebuildEngine(options?: { preserveState?: boolean; newSession?: boolean
   const newSession = options?.newSession ?? false;
 
   const prevEngine = engine;
-  const state = preserveState ? prevEngine.getState() : undefined;
+  const state = (preserveState && prevEngine) ? prevEngine.getState() : undefined;
   const nextSessionId = newSession ? `session-${Date.now()}` : sessionId;
   const nextProviderFactory = new ProviderFactory(providerConfig);
   const nextEngine = new GameEngine({
@@ -199,15 +229,87 @@ function rebuildEngine(options?: { preserveState?: boolean; newSession?: boolean
   engine = nextEngine;
   providerFactory = nextProviderFactory;
   sessionId = nextSessionId;
-  prevEngine.close();
+  // Safely close previous engine if it exists
+  if (prevEngine && typeof (prevEngine as any).close === 'function') {
+    try {
+      (prevEngine as any).close();
+    } catch (e) {
+      // swallow non-fatal close errors to avoid crashing the server during re-config
+      console.error('[Server] Failed to close previous engine:', e);
+    }
+  }
 }
 
 const app: express.Express = express();
 const PORT = process.env.PORT || SERVER.DEFAULT_PORT;
 
-// 中间件
-app.use(cors());
-app.use(express.json());
+// 中间件 - CORS 配置
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173', 'http://localhost:3000'];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: '1mb' })); // 限制请求体大小
+
+// 简单的内存速率限制中间件
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1分钟
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || '100', 10); // 默认100请求/分钟
+
+function rateLimitMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const clientId = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+
+  const clientData = rateLimitMap.get(clientId);
+  if (!clientData || now > clientData.resetTime) {
+    rateLimitMap.set(clientId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    next();
+    return;
+  }
+
+  if (clientData.count >= RATE_LIMIT_MAX) {
+    res.status(429).json({
+      success: false,
+      error: 'Rate limit exceeded. Please try again later.',
+      retryAfter: Math.ceil((clientData.resetTime - now) / 1000),
+    });
+    return;
+  }
+
+  clientData.count++;
+  next();
+}
+
+// 应用速率限制到 API 路由
+app.use('/api/', rateLimitMiddleware);
+
+// 服务器就绪检查中间件
+function readyCheckMiddleware(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  // 健康检查端点不需要就绪状态
+  if (req.path === '/api/health') {
+    next();
+    return;
+  }
+
+  if (!serverState.isReady) {
+    res.status(503).json({
+      success: false,
+      error: 'Server is not ready yet. Please wait for initialization to complete.',
+      status: 'initializing',
+    });
+    return;
+  }
+  next();
+}
+
+// 应用到所有 API 路由
+app.use('/api/', readyCheckMiddleware);
 
 // 静态文件服务
 app.use(express.static(path.join(__dirname, '../../ui/dist')));
@@ -226,11 +328,11 @@ app.get('/api/config', async (req, res) => {
         providerRouting: {
           defaultProvider: providerConfig.defaultProvider,
           agentOverrides: providerConfig.agentOverrides ?? {},
-          ollama: { defaultModel: providerConfig.ollama?.defaultModel, host: providerConfig.ollama?.host },
-          local: { defaultModel: providerConfig.local?.defaultModel, endpoint: providerConfig.local?.endpoint, apiKey: providerConfig.local?.apiKey ? '***' : undefined, name: providerConfig.local?.name },
-          lmstudio: { defaultModel: providerConfig.lmstudio?.defaultModel, endpoint: providerConfig.lmstudio?.endpoint, apiKey: providerConfig.lmstudio?.apiKey ? '***' : undefined, name: providerConfig.lmstudio?.name },
-          jan: { defaultModel: providerConfig.jan?.defaultModel, endpoint: providerConfig.jan?.endpoint, apiKey: providerConfig.jan?.apiKey ? '***' : undefined, name: providerConfig.jan?.name },
-          openai: { defaultModel: providerConfig.openai?.defaultModel, baseURL: providerConfig.openai?.baseURL, apiKey: providerConfig.openai?.apiKey ? '***' : undefined, enabled: true },
+          ollama: { defaultModel: providerConfig.ollama?.defaultModel },
+          local: { defaultModel: providerConfig.local?.defaultModel, name: providerConfig.local?.name },
+          lmstudio: { defaultModel: providerConfig.lmstudio?.defaultModel, name: providerConfig.lmstudio?.name },
+          jan: { defaultModel: providerConfig.jan?.defaultModel, name: providerConfig.jan?.name },
+          openai: { defaultModel: providerConfig.openai?.defaultModel, enabled: true },
         },
         runtime: {
           sessionId,
@@ -440,6 +542,13 @@ app.post('/api/turn', async (req, res) => {
       });
       return;
     }
+    if (input.length < LIMITS.PLAYER_INPUT_MIN || input.length > LIMITS.PLAYER_INPUT_MAX) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid input: input length must be between ${LIMITS.PLAYER_INPUT_MIN} and ${LIMITS.PLAYER_INPUT_MAX} characters`,
+      });
+      return;
+    }
 
     const result = await engine.processTurn(input);
     res.json({
@@ -462,6 +571,13 @@ app.post('/api/turn/stream', async (req, res) => {
       res.status(400).json({
         success: false,
         error: 'Invalid input: input is required and must be a string',
+      });
+      return;
+    }
+    if (input.length < LIMITS.PLAYER_INPUT_MIN || input.length > LIMITS.PLAYER_INPUT_MAX) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid input: input length must be between ${LIMITS.PLAYER_INPUT_MIN} and ${LIMITS.PLAYER_INPUT_MAX} characters`,
       });
       return;
     }
@@ -504,9 +620,15 @@ app.post('/api/turn/stream', async (req, res) => {
   }
 });
 
+// 获取存档列表
+const SavesListQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(LIMITS.SAVES_LIST_MAX)).optional(),
+});
+
 app.get('/api/saves', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit as string) || LIMITS.SAVES_LIST_DEFAULT;
+    const parsed = SavesListQuerySchema.safeParse(req.query);
+    const limit = parsed.success ? parsed.data.limit : LIMITS.SAVES_LIST_DEFAULT;
     const saves = await engine.listSaves(limit);
     res.json({ success: true, data: { saves } });
   } catch (error) {
@@ -518,9 +640,18 @@ app.get('/api/saves', async (req, res) => {
 });
 
 // 保存游戏
+const SaveGameSchema = z.object({
+  name: z.string().max(LIMITS.STRING_SHORT).optional(),
+}).strict();
+
 app.post('/api/save', async (req, res) => {
   try {
-    const { name } = req.body;
+    const parsed = SaveGameSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.message });
+      return;
+    }
+    const { name } = parsed.data;
     const saveId = await engine.save(name || `save-${Date.now()}`);
     res.json({
       success: true,
@@ -535,17 +666,18 @@ app.post('/api/save', async (req, res) => {
 });
 
 // 加载游戏
+const LoadGameSchema = z.object({
+  saveId: z.string().min(1).max(LIMITS.STRING_SHORT),
+}).strict();
+
 app.post('/api/load', async (req, res) => {
   try {
-    const { saveId } = req.body;
-    if (!saveId) {
-      res.status(400).json({
-        success: false,
-        error: 'saveId is required',
-      });
+    const parsed = LoadGameSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.message });
       return;
     }
-    await engine.load(saveId);
+    await engine.load(parsed.data.saveId);
     res.json({
       success: true,
       message: 'Game loaded successfully',
@@ -575,17 +707,18 @@ app.post('/api/reset', (req, res) => {
 });
 
 // 删除存档
+const DeleteSaveParamsSchema = z.object({
+  saveId: z.string().min(1).max(LIMITS.STRING_SHORT),
+});
+
 app.delete('/api/saves/:saveId', async (req, res) => {
   try {
-    const { saveId } = req.params;
-    if (!saveId) {
-      res.status(400).json({
-        success: false,
-        error: 'saveId is required',
-      });
+    const parsed = DeleteSaveParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.message });
       return;
     }
-    await engine.deleteSave(saveId);
+    await engine.deleteSave(parsed.data.saveId);
     res.json({
       success: true,
       message: 'Save deleted successfully',
@@ -608,11 +741,28 @@ app.get('/api/turn-count', (req, res) => {
 
 // 健康检查
 app.get('/api/health', (req, res) => {
-  res.json({
+  const uptime = Date.now() - serverState.startTime;
+  const detailed = req.query.detailed === 'true';
+
+  const response: Record<string, unknown> = {
     success: true,
-    status: 'ok',
+    status: serverState.isReady ? 'ready' : serverState.initError ? 'error' : 'initializing',
+    ready: serverState.isReady,
     timestamp: new Date().toISOString(),
-  });
+    uptime,
+  };
+
+  if (detailed) {
+    response.version = process.env.npm_package_version || '0.1.0';
+    response.environment = process.env.NODE_ENV || 'development';
+    response.memoryUsage = process.memoryUsage();
+    if (serverState.initError) {
+      response.initError = serverState.initError.message;
+    }
+  }
+
+  const statusCode = serverState.isReady ? 200 : 503;
+  res.status(statusCode).json(response);
 });
 
 app.post('/api/memories/clear', (req, res) => {
@@ -628,10 +778,16 @@ app.post('/api/memories/clear', (req, res) => {
 });
 
 // 获取记忆列表
+const MemoriesQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(LIMITS.MEMORY_LIST_DEFAULT * 2)).optional(),
+  type: z.enum(['observation', 'reflection', 'importance', 'world', 'npc', 'action', 'thought']).optional(),
+});
+
 app.get('/api/memories', (req, res) => {
   try {
-    const limit = parseInt(req.query.limit as string) || LIMITS.MEMORY_LIST_DEFAULT;
-    const type = req.query.type as string | undefined;
+    const parsed = MemoriesQuerySchema.safeParse(req.query);
+    const limit = parsed.success ? parsed.data.limit : LIMITS.MEMORY_LIST_DEFAULT;
+    const type = parsed.success ? parsed.data.type : undefined;
     const mm = engine.getMemoryManager();
     const memories = mm.getAllMemories({
       limit,
@@ -715,6 +871,10 @@ app.get('/api/achievements', (req, res) => {
 });
 
 app.get('/api/preview/default', (req, res) => {
+  if (!previewModelDir) {
+    res.status(503).json({ success: false, error: 'Preview generation not configured. Set PIXEL_MODEL_DIR environment variable.' });
+    return;
+  }
   res.sendFile(previewCoverPath, (err) => {
     if (err) {
       res.status(404).json({ success: false, error: 'default preview not found' });
@@ -724,6 +884,10 @@ app.get('/api/preview/default', (req, res) => {
 
 app.post('/api/preview/generate', async (req, res) => {
   try {
+    if (!previewModelDir) {
+      res.status(503).json({ success: false, error: 'Preview generation not configured. Set PIXEL_MODEL_DIR environment variable.' });
+      return;
+    }
     const schema = z.object({
       prompt: z.string().min(1).max(LIMITS.PREVIEW_PROMPT_MAX),
     }).strict();
@@ -788,15 +952,21 @@ app.post('/api/bootstrap/world', (req, res) => {
 });
 
 // 搜索记忆
+const MemorySearchQuerySchema = z.object({
+  q: z.string().min(1).max(LIMITS.STRING_MEDIUM),
+  limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(LIMITS.MEMORY_SEARCH_LIMIT)).optional(),
+});
+
 app.get('/api/memories/search', (req, res) => {
   try {
-    const query = req.query.q as string;
-    if (!query) {
-      res.status(400).json({ success: false, error: 'query parameter "q" is required' });
+    const parsed = MemorySearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: parsed.error.message });
       return;
     }
+    const { q, limit } = parsed.data;
     const mm = engine.getMemoryManager();
-    const memories = mm.recall(query, { limit: LIMITS.MEMORY_SEARCH_LIMIT });
+    const memories = mm.recall(q, { limit: limit ?? LIMITS.MEMORY_SEARCH_LIMIT });
     res.json({
       success: true,
       data: { memories },
@@ -1376,12 +1546,45 @@ app.get('/api/cot/events', (req, res) => {
       }
     }, 1000); // 每秒检查一次
     
-    // 客户端断开时清理
-    req.on('close', () => {
+    // 连接活跃状态追踪
+    let isActive = true;
+    let lastActivity = Date.now();
+    const CONNECTION_TIMEOUT = 5 * 60 * 1000; // 5分钟无活动自动断开
+
+    // 清理函数
+    const cleanup = (reason: string) => {
+      if (!isActive) return;
+      isActive = false;
       clearInterval(interval);
-      console.log('[COT Events] Client disconnected');
-    });
-    
+      clearInterval(heartbeatInterval);
+      clearTimeout(timeoutId);
+      logger.debug(`[COT Events] Connection closed: ${reason}`, { clientIp: req.ip });
+    };
+
+    // 心跳检测 - 每30秒发送一次保持连接
+    const heartbeatInterval = setInterval(() => {
+      if (!isActive) return;
+      try {
+        res.write(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+      } catch {
+        cleanup('heartbeat failed');
+      }
+    }, 30000);
+
+    // 连接超时检测
+    const timeoutId = setTimeout(() => {
+      if (Date.now() - lastActivity > CONNECTION_TIMEOUT) {
+        cleanup('connection timeout');
+        res.end();
+      }
+    }, CONNECTION_TIMEOUT);
+
+    // 多种断开情况处理
+    req.on('close', () => cleanup('client closed'));
+    req.on('error', () => cleanup('request error'));
+    res.on('close', () => cleanup('response closed'));
+    res.on('error', () => cleanup('response error'));
+
     // 发送初始连接确认
     res.write(`event: connected\ndata: ${JSON.stringify({
       type: 'connected',
@@ -1476,35 +1679,72 @@ function printStartupInfo(): void {
 
 // 异步初始化并启动服务器
 async function main(): Promise<void> {
-  // 初始化 Provider 配置（支持自动检测）
-  await initProviderConfig();
-
-  // 初始化 ProviderFactory 和 GameEngine
-  providerFactory = new ProviderFactory(providerConfig);
-  
-  // 试水加载 Plugin SDK
-  const extensionLoader = new ExtensionLoader(providerFactory);
   try {
-    console.log('🔌 正在加载本地 Provider 插件示例...');
-    const localProviderModule = await import('@openclaw/provider-local');
-    await extensionLoader.registerExtension(localProviderModule.default);
-    console.log('✅ 插件加载成功');
-  } catch (err) {
-    console.error('❌ 插件加载失败:', err);
+    // 初始化 Provider 配置（支持自动检测）
+    await initProviderConfig();
+
+    // 初始化 ProviderFactory 和 GameEngine
+    providerFactory = new ProviderFactory(providerConfig);
+
+    // 加载 Plugin SDK - 失败时根据配置决定是否继续
+    const extensionLoader = new ExtensionLoader(providerFactory);
+    const strictPluginLoading = process.env.STRICT_PLUGIN_LOADING === 'true';
+    try {
+      logger.info('Loading local provider plugin...');
+      const localProviderModule = await import('@openclaw/provider-local');
+      await extensionLoader.registerExtension(localProviderModule.default);
+      logger.info('Plugin loaded successfully');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      if (strictPluginLoading) {
+        logger.error('Plugin loading failed (strict mode)', err instanceof Error ? err : undefined);
+        throw new Error(`Plugin loading failed: ${errorMsg}`);
+      }
+      logger.warn('Plugin loading failed, continuing without plugin', { error: errorMsg });
+    }
+
+    engine = new GameEngine({
+      config: gameConfig,
+      providerFactory,
+      dataPath,
+      memoryDbPath,
+      sessionId,
+    });
+
+    // 启动服务器
+    const server = app.listen(PORT, () => {
+      // 设置就绪状态
+      serverState.isReady = true;
+      const initDuration = Date.now() - serverState.startTime;
+      logger.info('Server is ready', { initDuration, port: PORT });
+      printStartupInfo();
+    });
+
+    // 优雅关闭处理
+    const gracefulShutdown = (signal: string) => {
+      logger.info(`Received ${signal}, starting graceful shutdown...`);
+      serverState.isReady = false;
+      server.close(() => {
+        logger.info('Server closed');
+        if (engine && typeof (engine as any).close === 'function') {
+          try {
+            (engine as any).close();
+          } catch (e) {
+            logger.error('Error closing engine', e instanceof Error ? e : undefined);
+          }
+        }
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  } catch (error) {
+    serverState.initError = error instanceof Error ? error : new Error(String(error));
+    serverState.isReady = false;
+    throw error;
   }
-
-  engine = new GameEngine({
-    config: gameConfig,
-    providerFactory,
-    dataPath,
-    memoryDbPath,
-    sessionId,
-  });
-
-  // 启动服务器
-  app.listen(PORT, () => {
-    printStartupInfo();
-  });
 }
 
 // 启动应用

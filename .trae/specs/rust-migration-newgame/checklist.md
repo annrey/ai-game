@@ -1,3 +1,0 @@
-- [x] 根目录下已成功创建 `newgame` 文件夹。
-- [x] `newgame/Cargo.toml` 文件已正确创建并包含 `[workspace]` 声明。
-- [x] `newgame` 下包含规划的基础目录结构（`apps`, `crates`, `ffi` 等）。

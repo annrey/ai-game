@@ -134,7 +134,7 @@ impl GameMode for ChatRoleplayMode {
             current_location: self.template.name.clone(),
             location_description: format!("你进入了「{}」的场景。{}周围的环境让你感到沉浸其中，故事即将展开。", self.template.name, self.template.description),
             player: crate::state_store::PlayerStats::default(),
-            scene_type: "town".to_string(),
+            scene_type: crate::state_store::SceneType::Town,
         };
 
         let mut intro = format!(

@@ -109,6 +109,8 @@ export class RuleEngine {
       }
       return new RegExp(pattern);
     } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.warn(`[RuleEngine] 无效的正则表达式 "${pattern}": ${errMsg}`);
       return null;
     }
   }

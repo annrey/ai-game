@@ -44,7 +44,36 @@ impl EngineHandle {
         self.inner.delete_save(save_id).await
     }
 
+    pub async fn get_memories(&self, options: &str) -> anyhow::Result<String> {
+        self.inner.get_memories(options).await
+    }
+
+    pub async fn recall_memories(&self, query: &str, options: &str) -> anyhow::Result<String> {
+        self.inner.recall_memories(query, options).await
+    }
+
+    pub async fn clear_memories(&self) -> anyhow::Result<()> {
+        self.inner.clear_memories().await
+    }
+
+    pub async fn get_memory_count(&self) -> anyhow::Result<i32> {
+        self.inner.get_memory_count().await
+    }
+
     pub async fn start(&self) {
         self.inner.start().await;
+    }
+
+    /// 派发消息给指定角色的 Agent（如 "guide"）
+    pub async fn dispatch_to_agent(&self, role: &str, input: &str) -> anyhow::Result<String> {
+        let agent_manager = self.inner.agent_manager();
+        let agent = agent_manager
+            .get(role)
+            .ok_or_else(|| anyhow::anyhow!("Agent not found: {}", role))?;
+
+        let state_snapshot = self.inner.state_store().read(|s| format!("{:?}", s)).await;
+        let response = agent.process_action(&state_snapshot, input, &[]).await?;
+
+        Ok(response.content)
     }
 }

@@ -65,6 +65,7 @@ pub struct HistoryQuery {
 pub struct EventGraph {
     nodes: HashMap<String, EventNode>,
     edges: HashMap<String, CausalEdge>,
+    #[allow(dead_code)]
     chains: HashMap<String, EventChain>,
     cause_index: HashMap<String, Vec<String>>,
     effect_index: HashMap<String, Vec<String>>,
@@ -87,10 +88,10 @@ impl EventGraph {
         }
     }
 
-    pub fn record_event(&mut self, event: EventNode) -> &EventNode {
+    pub fn record_event(&mut self, event: EventNode) -> Option<&EventNode> {
         let id = event.id.clone();
         self.nodes.insert(id.clone(), event);
-        self.nodes.get(&id).unwrap()
+        self.nodes.get(&id)
     }
 
     pub fn link_causality(
@@ -100,7 +101,7 @@ impl EventGraph {
         causal_type: CausalType,
         strength: f32,
         description: impl Into<String>,
-    ) -> &CausalEdge {
+    ) -> Option<&CausalEdge> {
         let cause_id = cause_event_id.into();
         let effect_id = effect_event_id.into();
         let edge_id = format!("{}->{}", cause_id, effect_id);
@@ -118,7 +119,7 @@ impl EventGraph {
         self.cause_index.entry(cause_id.clone()).or_default().push(edge_id.clone());
         self.effect_index.entry(effect_id.clone()).or_default().push(edge_id.clone());
         self.edges.insert(edge_id.clone(), edge);
-        self.edges.get(&edge_id).unwrap()
+        self.edges.get(&edge_id)
     }
 
     pub fn find_causes(&self, event_id: &str, depth: usize) -> Vec<&EventNode> {

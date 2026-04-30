@@ -13,6 +13,8 @@ strum = { version = "0.26", features = ["derive"] }
 strum_macros = "0.26"
 indexmap = { version = "2.0", features = ["serde"] }
 parking_lot = "0.12"
+rand = "0.8"
+game_core = { path = "../core" }
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }

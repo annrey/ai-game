@@ -48,13 +48,14 @@ impl Rule for QuestRule {
             match action {
                 "add" => {
                     if let Ok(payload) = serde_json::from_value::<QuestAddPayload>(event.payload.clone()) {
-                        quests[&payload.quest.id] = serde_json::to_value(&payload.quest).unwrap();
+                        quests[&payload.quest.id] = serde_json::to_value(&payload.quest)
+                            .expect("quest serialization is infallible for Quest type");
                         println!("Quest added: {}", payload.quest.title);
                     }
                 }
                 "update" => {
                     if let Ok(payload) = serde_json::from_value::<QuestUpdatePayload>(event.payload.clone()) {
-                        let mut quest_val = quests[&payload.quest_id].clone();
+                        let quest_val = quests[&payload.quest_id].clone();
                         if !quest_val.is_null() {
                             if let Ok(mut quest) = serde_json::from_value::<Quest>(quest_val.clone()) {
                                 
@@ -88,7 +89,8 @@ impl Rule for QuestRule {
                                     }
                                 }
 
-                                quests[&payload.quest_id] = serde_json::to_value(&quest).unwrap();
+                                quests[&payload.quest_id] = serde_json::to_value(&quest)
+                                    .expect("quest serialization is infallible for Quest type");
                                 println!("Quest updated: {}", payload.quest_id);
                             }
                         }

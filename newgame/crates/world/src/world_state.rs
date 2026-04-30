@@ -38,6 +38,21 @@ pub enum TimeOfDay {
     Midnight,
 }
 
+impl std::fmt::Display for TimeOfDay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            TimeOfDay::Dawn => "dawn",
+            TimeOfDay::Morning => "morning",
+            TimeOfDay::Noon => "noon",
+            TimeOfDay::Afternoon => "afternoon",
+            TimeOfDay::Dusk => "dusk",
+            TimeOfDay::Night => "night",
+            TimeOfDay::Midnight => "midnight",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub player_id: String,

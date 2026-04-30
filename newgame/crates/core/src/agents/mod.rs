@@ -86,6 +86,14 @@ pub struct AgentManager {
     agents: HashMap<String, std::sync::Arc<dyn BaseAgent>>,
 }
 
+impl Clone for AgentManager {
+    fn clone(&self) -> Self {
+        Self {
+            agents: self.agents.clone(),
+        }
+    }
+}
+
 impl AgentManager {
     pub fn new() -> Self {
         Self {

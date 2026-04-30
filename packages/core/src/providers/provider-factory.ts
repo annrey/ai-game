@@ -220,6 +220,7 @@ export class ProviderFactory {
   private providers = new Map<string, AIProvider>();
   private config: ProviderFactoryConfig;
   private providerExtensions = new Map<string, ProviderExtension>();
+  private errors = new Map<string, Error>();
 
   constructor(config: ProviderFactoryConfig) {
     this.config = config;
@@ -372,8 +373,10 @@ export class ProviderFactory {
         try {
           const provider = this.getByType(id);
           all.set(id, provider);
-        } catch (e) {
-          console.warn(`无法实例化 Provider 扩展 ${id}`, e);
+         } catch (e) {
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          console.error(`[ProviderFactory] 无法实例化 Provider 扩展 ${id}:`, errorMessage);
+          this.errors.set(id, e instanceof Error ? e : new Error(errorMessage));
         }
       }
     }

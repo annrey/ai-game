@@ -63,6 +63,10 @@ export const LIMITS = {
   RULEBOOK_MAX_LENGTH: 200000,
   /** 预览生成提示词最大长度 */
   PREVIEW_PROMPT_MAX: 500,
+  /** 玩家输入最大长度（字符数） */
+  PLAYER_INPUT_MAX: 2000,
+  /** 玩家输入最小长度（字符数） */
+  PLAYER_INPUT_MIN: 1,
   /** 最大历史回合配置最小值 */
   MAX_HISTORY_TURNS_MIN: 1,
   /** 最大历史回合配置最大值 */

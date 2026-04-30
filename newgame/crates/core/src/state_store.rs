@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// 并发访问限制 - 防止资源耗尽
+const MAX_CONCURRENT_OPERATIONS: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerStats {
@@ -64,7 +67,44 @@ pub struct WorldState {
     pub current_location: String,
     pub location_description: String,
     pub player: PlayerStats,
-    pub scene_type: String,
+    pub scene_type: SceneType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub enum SceneType {
+    #[default]
+    Forest,
+    Town,
+    Dungeon,
+    Beach,
+    Mountain,
+    Custom,
+}
+
+impl SceneType {
+    /// 从字符串 key 转换（用于 world 子系统同步）
+    pub fn from_key(s: &str) -> Self {
+        match s {
+            "forest" => SceneType::Forest,
+            "town" => SceneType::Town,
+            "dungeon" => SceneType::Dungeon,
+            "beach" => SceneType::Beach,
+            "mountain" => SceneType::Mountain,
+            _ => SceneType::Custom,
+        }
+    }
+
+    /// 转换为字符串 key
+    pub fn to_key(&self) -> &'static str {
+        match self {
+            SceneType::Forest => "forest",
+            SceneType::Town => "town",
+            SceneType::Dungeon => "dungeon",
+            SceneType::Beach => "beach",
+            SceneType::Mountain => "mountain",
+            SceneType::Custom => "custom",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,7 +304,7 @@ impl Default for WorldState {
             current_location: "迷雾十字路口".to_string(),
             location_description: "你站在一片被阳光照亮的十字路口，四周是茂密的森林、广阔的平原和蜿蜒的小溪。".to_string(),
             player: PlayerStats::default(),
-            scene_type: "forest".to_string(),
+            scene_type: SceneType::Forest,
         }
     }
 }
@@ -284,6 +324,8 @@ pub struct StateStore {
     state: Arc<RwLock<WorldState>>,
     save_dir: PathBuf,
     db_pool: Option<sqlx::SqlitePool>,
+    /// 并发操作限制信号量
+    semaphore: Arc<Semaphore>,
 }
 
 impl StateStore {
@@ -292,6 +334,7 @@ impl StateStore {
             state: Arc::new(RwLock::new(WorldState::default())),
             save_dir: save_dir.into(),
             db_pool: None,
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_OPERATIONS)),
         }
     }
 
@@ -300,6 +343,7 @@ impl StateStore {
             state: Arc::new(RwLock::new(WorldState::default())),
             save_dir: save_dir.into(),
             db_pool: Some(db_pool),
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_OPERATIONS)),
         }
     }
 
@@ -327,6 +371,8 @@ impl StateStore {
     where
         F: FnOnce(&WorldState) -> R,
     {
+        // 获取并发许可
+        let _permit = self.semaphore.acquire().await.expect("Semaphore closed");
         let lock = self.state.read().await;
         f(&*lock)
     }
@@ -335,6 +381,8 @@ impl StateStore {
     where
         F: FnOnce(&mut WorldState) -> R,
     {
+        // 获取并发许可
+        let _permit = self.semaphore.acquire().await.expect("Semaphore closed");
         let mut lock = self.state.write().await;
         f(&mut *lock)
     }

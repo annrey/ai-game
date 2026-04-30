@@ -2,8 +2,10 @@ node_modules/
 dist/
 data/saves/
 data/logs/
+# Environment files - Never commit secrets
 .env
-.env.test.local
+.env.*
+!.env.example
 *.tsbuildinfo
 
 # Rust build artifacts
@@ -15,7 +17,10 @@ target/
 # IDE / OS
 .DS_Store
 .idea/
+.vscode/
 .vscode/*.local
+.trae/
+.kiro/
 
 # Tauri / Bevy
 newgame/dist/
@@ -23,6 +28,31 @@ newgame/src-tauri/gen/
 newgame/src-tauri/icons/
 
 # Local DB and incremental data
-data/memories.db
+data/
+!data/saves/.gitkeep
+!data/logs/.gitkeep
 *.sqlite
 *.sqlite-journal
+*.db
+*.db-shm
+*.db-wal
+
+# Security: Never commit backup files that may contain secrets
+*.backup
+*.bak
+*.key
+secrets/
+*.pem
+*.p8
+*.p12
+*.pfx
+
+# Package manager lock files (when using pnpm)
+package-lock.json
+apps/*/package-lock.json
+
+# Legacy fix scripts
+fix*.py
+fix*.cjs
+refactor_all.py
+extract_init.py
