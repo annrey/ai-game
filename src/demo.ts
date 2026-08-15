@@ -3,8 +3,8 @@
  * 使用方法：npx tsx src/demo.ts [--mode adventure|battle|sandbox|roleplay]
  */
 
-import { loadTestConfig } from './utils/config.js';
-loadTestConfig();
+import { loadEnv } from './utils/config.js';
+loadEnv();
 
 import * as readline from 'readline';
 import chalk from 'chalk';

@@ -1,39 +1,28 @@
 # ---- Build Stage ----
-FROM node:20-alpine AS builder
+FROM rust:1.92-alpine AS builder
 WORKDIR /app
-
-# 安装构建依赖（better-sqlite3 需要编译）
-RUN apk add --no-cache python3 make g++
-
-COPY package.json package-lock.json ./
-RUN npm ci
-
-COPY . .
-RUN npm run build
+RUN apk add --no-cache musl-dev
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build -p ai-storyteller --release
 
 # ---- Production Stage ----
-FROM node:20-alpine
+FROM alpine:3.21
 WORKDIR /app
-
-# better-sqlite3 运行时需要的原生模块
-RUN apk add --no-cache libstdc++
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/ui ./ui
-COPY --from=builder /app/skills ./skills
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-
-# 创建数据目录
+RUN apk add --no-cache libgcc wget
+COPY --from=builder /app/target/release/ai-storyteller /usr/local/bin/ai-storyteller
+COPY ui ./ui
+COPY scripts ./scripts
+COPY skills ./skills
+COPY .env.example ./.env
 RUN mkdir -p /app/data
 
-# 如果存在 .env.example 则复制为 .env
-COPY --from=builder /app/.env.example ./.env 2>/dev/null || true
+ENV BIND_HOST=0.0.0.0
+ENV ALLOW_REMOTE=true
 
 EXPOSE 3000
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+  CMD wget -q -O- http://127.0.0.1:3000/api/health || exit 1
 
-CMD ["node", "dist/server.js"]
+CMD ["ai-storyteller"]

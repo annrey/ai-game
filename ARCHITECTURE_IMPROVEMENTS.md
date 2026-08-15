@@ -1,5 +1,7 @@
 # AI 说书人委员会 - 架构改进规划文档
 
+> **历史文档（2026-03）。** 默认运行时已迁到 Rust crate `crates/ai-storyteller`。下文的 pnpm monorepo、LanceDB、Extension SDK 不再是当前迭代目标。现行待办见 [TODO.md](TODO.md)。
+
 本文档基于 openclaw 主项目架构分析，结合游戏引擎特点，规划 game 项目的架构改进方向。
 
 ---

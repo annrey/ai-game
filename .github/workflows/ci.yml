@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Test
+        run: cargo test -p ai-storyteller
+      - name: Clippy
+        run: cargo clippy -p ai-storyteller --all-targets -- -D warnings

@@ -16,7 +16,7 @@ const MODE_CONFIG: GameConfig = {
   difficulty: 'normal',
   memoryMaxContextChars: 2000,
   autoWorldTick: true,
-  idleTimeout: 300000,
+  idleTimeout: 300,
   // 全代理启用 — 沙盒模式需要所有能力
   enabledAgents: ['narrator', 'world-keeper', 'npc-director', 'rule-arbiter', 'drama-curator'],
   maxHistoryTurns: 40,
@@ -24,7 +24,7 @@ const MODE_CONFIG: GameConfig = {
     enabled: true,
     level: 'info',
   },
-  autoSaveInterval: 300000,
+  autoSaveInterval: 10,
 };
 
 export function createNPCSandbox(

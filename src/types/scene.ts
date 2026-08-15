@@ -2,6 +2,8 @@
  * 场景状态类型定义
  */
 
+import type { ChainOfThought } from './agent.js';
+
 export interface GameTime {
   day: number;
   hour: number;
@@ -85,6 +87,15 @@ export interface PlayerState {
   [key: string]: unknown;
 }
 
+export interface TurnRecord {
+  turn: number;
+  input: string;
+  narrative: string;
+  timestamp: number;
+  chainOfThought?: ChainOfThought;
+  agentThoughts?: ChainOfThought[];
+}
+
 /**
  * 核心场景状态 — 所有代理共享
  */
@@ -107,4 +118,8 @@ export interface SceneState {
   environment: EnvironmentState;
   /** 玩家背包/状态 */
   playerState: PlayerState;
+  /** 当前回合（含思维链） */
+  currentTurn?: TurnRecord;
+  /** 近期回合历史 */
+  history?: TurnRecord[];
 }

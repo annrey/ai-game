@@ -137,20 +137,15 @@ Generate narrative text about the forest.
       expect(chainOfThought.steps[0].content).toContain('等待时间流逝');
     });
 
-    it('当响应没有标记时应生成简化的思维链', () => {
+    it('当响应没有标记时不应伪造思维步骤', () => {
       const content = '这是一个普通的响应，没有任何思维链标记。';
       const startTime = Date.now() - 600;
       const endTime = Date.now();
 
       const chainOfThought = agent.testExtractChainOfThought(content, startTime, endTime);
 
-      expect(chainOfThought.steps).toHaveLength(5);
-      expect(chainOfThought.steps[0].step).toBe('observation');
-      expect(chainOfThought.steps[0].content).toContain('收到请求');
-      expect(chainOfThought.steps[1].step).toBe('analysis');
-      expect(chainOfThought.steps[2].step).toBe('reasoning');
-      expect(chainOfThought.steps[3].step).toBe('decision');
-      expect(chainOfThought.steps[4].step).toBe('action');
+      expect(chainOfThought.steps).toHaveLength(0);
+      expect(chainOfThought.summary).toContain('无结构化思维标记');
     });
 
     it('应能处理部分标记的响应', () => {
@@ -214,8 +209,8 @@ NPC 是酒馆老板，性格友好。
       const chainOfThought = agent.testExtractChainOfThought(content, startTime, endTime);
 
       expect(chainOfThought.summary).toBeDefined();
-      expect(chainOfThought.summary).toContain('👁️ 观察');
-      expect(chainOfThought.summary).toContain('🧠 分析');
+      expect(chainOfThought.summary).toContain('观察');
+      expect(chainOfThought.summary).toContain('分析');
     });
   });
 
@@ -330,8 +325,8 @@ NPC 是酒馆老板，性格友好。
 
       const chainOfThought = agent.testExtractChainOfThought('', startTime, endTime);
 
-      expect(chainOfThought.steps).toHaveLength(5);
-      expect(chainOfThought.steps[0].content).toContain('收到请求');
+      expect(chainOfThought.steps).toHaveLength(0);
+      expect(chainOfThought.summary).toContain('无结构化思维标记');
     });
 
     it('应能处理非常长的响应', () => {

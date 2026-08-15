@@ -108,10 +108,12 @@ const [worldKeeperResp, npcDirectorResp] = await Promise.all([
 
 ## 🎯 下一步建议
 
+默认命令已改为 `cargo run -p ai-storyteller`。代理并行、180s 超时和 Provider 重试已在 Rust 运行时落地。其余见 [TODO.md](TODO.md)。
+
 ### 高优先级
-1. 实现并发代理调用优化
-2. 添加本地模型专用超时配置
-3. 增强错误处理和重试机制
+1. ~~实现并发代理调用优化~~（Rust `join_all`）
+2. ~~添加本地模型专用超时配置~~（180s）
+3. ~~增强错误处理和重试机制~~（超时 / 429 / 5xx 重试 2 次）
 
 ### 中优先级
 4. 实现简单的响应缓存

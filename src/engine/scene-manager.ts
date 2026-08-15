@@ -7,6 +7,23 @@ import { EventBus, GameEvents } from './event-bus.js';
 import { StateStore } from './state-store.js';
 import type { NPCState, EnvironmentState, Action, PlotPoint, Quest } from '../types/scene.js';
 import { v4 as uuidv4 } from 'uuid';
+import type { PlayerState } from '../types/scene.js';
+
+function toInventoryType(type?: string): PlayerState['inventory'][number]['type'] {
+  switch (type) {
+    case 'weapon':
+    case 'armor':
+    case 'consumable':
+    case 'quest':
+    case 'misc':
+      return type;
+    case 'drink':
+    case 'food':
+      return 'consumable';
+    default:
+      return 'misc';
+  }
+}
 
 export class SceneManager {
   private eventBus: EventBus;
@@ -112,6 +129,7 @@ export class SceneManager {
     const state = this.stateStore.getState();
     const inventory = [...state.playerState.inventory];
     const existingIndex = inventory.findIndex(i => i.name === item.name);
+    const inventoryType = toInventoryType(item.type);
 
     if (item.action === 'add') {
       if (existingIndex >= 0) {
@@ -122,7 +140,7 @@ export class SceneManager {
           name: item.name,
           quantity: item.quantity,
           description: item.description || '',
-          type: (item.type as any) || 'misc'
+          type: inventoryType,
         });
       }
     } else if (item.action === 'remove') {

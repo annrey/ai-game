@@ -182,7 +182,7 @@ describe('ItemValidator', () => {
       const result = validator.validateItem(item);
 
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('物品类型必须是 drink, food, misc, service 之一');
+      expect(result.errors[0]).toMatch(/物品类型必须是/);
     });
 
     it('应拒绝价格过低的物品', () => {

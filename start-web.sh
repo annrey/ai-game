@@ -54,8 +54,11 @@ fi
 
 export PREVIEW_PYTHON="$SDXL_PYTHON"
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-PIXEL_MODEL_DIR="${PIXEL_MODEL_DIR:-/Users/chengyongwei/Documents/326_ckpt_SD_XL}"
-MODEL_FILE="$(find "$PIXEL_MODEL_DIR" -maxdepth 1 -name '*.safetensors' | head -n 1 || true)"
+PIXEL_MODEL_DIR="${PIXEL_MODEL_DIR:-}"
+MODEL_FILE=""
+if [ -n "$PIXEL_MODEL_DIR" ] && [ -d "$PIXEL_MODEL_DIR" ]; then
+  MODEL_FILE="$(find "$PIXEL_MODEL_DIR" -maxdepth 1 -name '*.safetensors' | head -n 1 || true)"
+fi
 
 if [ -n "$MODEL_FILE" ] && head -n 1 "$MODEL_FILE" 2>/dev/null | grep -q 'git-lfs.github.com/spec/v1'; then
   echo ""

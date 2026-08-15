@@ -6,7 +6,10 @@ from pathlib import Path
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
-MODEL_DIR = Path(os.environ.get("PIXEL_MODEL_DIR", "/Users/chengyongwei/Documents/326_ckpt_SD_XL"))
+_model_dir = os.environ.get("PIXEL_MODEL_DIR", "").strip()
+if not _model_dir:
+    raise SystemExit("PIXEL_MODEL_DIR is not set")
+MODEL_DIR = Path(_model_dir)
 
 
 def make_dirs(path: Path):

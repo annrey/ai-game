@@ -3,14 +3,8 @@
  * 提供静态文件服务和游戏 API
  */
 
-import { loadTestConfig } from './utils/config.js';
-loadTestConfig();
-
-// 调试：打印环境变量
-console.log('🔧 环境变量检查:');
-console.log('  DEFAULT_PROVIDER:', process.env.DEFAULT_PROVIDER);
-console.log('  OLLAMA_HOST:', process.env.OLLAMA_HOST);
-console.log('  OLLAMA_MODEL:', process.env.OLLAMA_MODEL);
+import { loadEnv } from './utils/config.js';
+loadEnv();
 
 import express from 'express';
 import cors from 'cors';
@@ -18,26 +12,39 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import { execFile } from 'child_process';
+import { randomBytes } from 'crypto';
+import { readFileSync } from 'fs';
 import { GameEngine } from './engine/game-engine.js';
 import { ProviderFactory, type ProviderFactoryConfig, printLocalModelGuide } from './providers/provider-factory.js';
-import type { GameConfig, GameMode } from './types/game.js';
+import type { GameConfig } from './types/game.js';
 import { z } from 'zod';
 import { SERVER, LIMITS, HISTORY, MEMORY } from './constants.js';
 import { GuideManager } from './engine/guide-manager.js';
 import { GuideAgent } from './agents/guide-agent.js';
 import type { GuideStepId } from './types/guide.js';
+import { assertOptionalProviderUrl } from './utils/safe-url.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dataPath = process.env.DATA_PATH || './data/saves';
 const memoryDbPath = process.env.MEMORY_DB_PATH || './data/memories.db';
-const previewModelDir = process.env.PIXEL_MODEL_DIR || '/Users/chengyongwei/Documents/326_ckpt_SD_XL';
+const previewModelDir = process.env.PIXEL_MODEL_DIR || '';
 const previewOutputPath = path.join(__dirname, '../ui/generated/latest-preview.png');
-const previewCoverPath = path.join(previewModelDir, '_cover_images_/cover_image.png');
+const previewCoverPath = previewModelDir
+  ? path.join(previewModelDir, '_cover_images_', 'cover_image.png')
+  : previewOutputPath;
 const previewPython = process.env.PREVIEW_PYTHON || path.join(process.cwd(), '.sdxl-venv/bin/python3');
 const hfEndpoint = process.env.HF_ENDPOINT || 'https://hf-mirror.com';
 const execFileAsync = promisify(execFile);
+const previewGenerateEnabled = process.env.ENABLE_PREVIEW_GENERATE === 'true';
+
+const PORT = Number(process.env.PORT) || SERVER.DEFAULT_PORT;
+const allowRemote = process.env.ALLOW_REMOTE === 'true';
+const BIND_HOST = process.env.BIND_HOST || (allowRemote ? '0.0.0.0' : SERVER.DEFAULT_BIND_HOST);
+const isLoopbackBind = BIND_HOST === '127.0.0.1' || BIND_HOST === 'localhost' || BIND_HOST === '::1';
+const apiToken = process.env.LOCAL_API_TOKEN || randomBytes(24).toString('hex');
+const uiOnly = process.env.UI_ONLY === 'true' || process.argv.includes('--ui-only');
 
 let providerConfig: ProviderFactoryConfig;
 let providerFactory: ProviderFactory;
@@ -53,7 +60,6 @@ let detectedServiceInfo: { name: string; endpoint: string; type: string } | null
  */
 async function initProviderConfig(): Promise<void> {
   const defaultProvider = process.env.DEFAULT_PROVIDER;
-  const uiOnly = process.env.UI_ONLY === 'true';
 
   // UI 模式：跳过 provider 检查，使用 mock 配置
   if (uiOnly) {
@@ -158,7 +164,7 @@ let gameConfig: GameConfig = {
   difficulty: 'normal',
   memoryMaxContextChars: 2000,
   autoWorldTick: false,
-  idleTimeout: 30000,
+  idleTimeout: 30,
   enabledAgents: ['narrator', 'world-keeper', 'npc-director', 'rule-arbiter', 'drama-curator'],
   maxHistoryTurns: HISTORY.DEFAULT_MAX_TURNS,
   logging: {
@@ -197,13 +203,89 @@ function rebuildEngine(options?: { preserveState?: boolean; newSession?: boolean
 }
 
 const app = express();
-const PORT = process.env.PORT || SERVER.DEFAULT_PORT;
 
-// 中间件
-app.use(cors());
-app.use(express.json());
+function readCookie(req: express.Request, name: string): string | undefined {
+  const raw = req.headers.cookie;
+  if (!raw) return undefined;
+  for (const part of raw.split(';')) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(rest.join('='));
+  }
+  return undefined;
+}
 
-// 静态文件服务
+function requestApiToken(req: express.Request): string | undefined {
+  const header = req.header('x-api-token');
+  if (header) return header;
+  const auth = req.header('authorization');
+  if (auth?.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return readCookie(req, 'api_token');
+}
+
+const corsOrigins = [
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
+  process.env.CORS_ORIGIN,
+].filter((v): v is string => !!v);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || corsOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: LIMITS.JSON_BODY_LIMIT }));
+
+app.use((req, res, next) => {
+  if (uiOnly && req.path.startsWith('/api') && req.path !== '/api/health') {
+    res.status(503).json({ success: false, error: 'UI preview mode: game API disabled' });
+    return;
+  }
+  if (!req.path.startsWith('/api')) {
+    next();
+    return;
+  }
+  if (req.path === '/api/health') {
+    next();
+    return;
+  }
+  if (req.path === '/api/preview/default' && (req.method === 'GET' || req.method === 'HEAD')) {
+    next();
+    return;
+  }
+  const mutating = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (!mutating && isLoopbackBind) {
+    next();
+    return;
+  }
+  if (requestApiToken(req) !== apiToken) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+  next();
+});
+
+function sendIndex(res: express.Response): void {
+  const htmlPath = path.join(__dirname, '../ui/index.html');
+  let html = readFileSync(htmlPath, 'utf8');
+  html = html.replace(
+    "window.__API_TOKEN__ = window.__API_TOKEN__ || '';",
+    `window.__API_TOKEN__ = ${JSON.stringify(apiToken)};`,
+  );
+  res.cookie('api_token', apiToken, {
+    httpOnly: true,
+    sameSite: 'strict',
+    path: '/',
+  });
+  res.type('html').send(html);
+}
+
+app.get('/', (_req, res) => sendIndex(res));
+app.get('/index.html', (_req, res) => sendIndex(res));
 app.use(express.static(path.join(__dirname, '../ui')));
 
 // API 路由
@@ -249,7 +331,13 @@ const GameConfigPatchSchema = z.object({
   language: z.string().min(2).max(50).optional(),
   enabledAgents: z.array(AgentRoleSchema).min(1).optional(),
   streaming: z.boolean().optional(),
-  logging: z.boolean().optional(),
+  logging: z.union([
+    z.boolean(),
+    z.object({
+      enabled: z.boolean(),
+      level: z.enum(['debug', 'info', 'warn', 'error']),
+    }),
+  ]).optional(),
   maxHistoryTurns: z.number().int().min(LIMITS.MAX_HISTORY_TURNS_MIN).max(LIMITS.MAX_HISTORY_TURNS_MAX).optional(),
   memoryMaxContextChars: z.number().int().min(MEMORY.MIN_CONTEXT_CHARS).max(MEMORY.MAX_CONTEXT_CHARS).optional(),
   autoSaveInterval: z.number().int().min(0).max(LIMITS.AUTO_SAVE_INTERVAL_MAX).optional(),
@@ -265,10 +353,13 @@ app.post('/api/config', async (req, res) => {
       return;
     }
 
-    const patch = parsed.data;
+    const { logging: loggingPatch, language: _language, streaming: _streaming, ...configPatch } = parsed.data;
     const next: GameConfig = {
       ...gameConfig,
-      ...patch,
+      ...configPatch,
+      logging: typeof loggingPatch === 'boolean'
+        ? { ...gameConfig.logging, enabled: loggingPatch }
+        : loggingPatch ?? gameConfig.logging,
     };
 
     if (!next.enabledAgents.includes('narrator')) {
@@ -372,6 +463,20 @@ app.post('/api/providers/config', async (req, res) => {
     }
 
     const patch = parsed.data;
+    try {
+      assertOptionalProviderUrl(patch.ollama?.host, 'local');
+      assertOptionalProviderUrl(patch.local?.endpoint, 'local');
+      assertOptionalProviderUrl(patch.lmstudio?.endpoint, 'local');
+      assertOptionalProviderUrl(patch.jan?.endpoint, 'local');
+      assertOptionalProviderUrl(patch.openai?.baseURL, 'openai');
+    } catch (urlError) {
+      res.status(400).json({
+        success: false,
+        error: urlError instanceof Error ? urlError.message : 'Invalid provider URL',
+      });
+      return;
+    }
+
     const nextAgentOverrides = { ...(providerConfig.agentOverrides ?? {}) } as any;
     if (patch.agentOverrides) {
       for (const [k, v] of Object.entries(patch.agentOverrides)) {
@@ -411,6 +516,13 @@ app.post('/api/turn', async (req, res) => {
       });
       return;
     }
+    if (input.length > LIMITS.TURN_INPUT_MAX) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid input: must be at most ${LIMITS.TURN_INPUT_MAX} characters`,
+      });
+      return;
+    }
 
     const result = await engine.processTurn(input);
     res.json({
@@ -433,6 +545,13 @@ app.post('/api/turn/stream', async (req, res) => {
       res.status(400).json({
         success: false,
         error: 'Invalid input: input is required and must be a string',
+      });
+      return;
+    }
+    if (input.length > LIMITS.TURN_INPUT_MAX) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid input: must be at most ${LIMITS.TURN_INPUT_MAX} characters`,
       });
       return;
     }
@@ -695,6 +814,13 @@ app.get('/api/preview/default', (req, res) => {
 
 app.post('/api/preview/generate', async (req, res) => {
   try {
+    if (!previewGenerateEnabled || !previewModelDir) {
+      res.status(403).json({
+        success: false,
+        error: 'Preview generation is disabled. Set ENABLE_PREVIEW_GENERATE=true and PIXEL_MODEL_DIR.',
+      });
+      return;
+    }
     const schema = z.object({
       prompt: z.string().min(1).max(LIMITS.PREVIEW_PROMPT_MAX),
     }).strict();
@@ -792,12 +918,8 @@ let guideAgent: GuideAgent | null = null;
 function getGuideManager(): GuideManager {
   if (!guideManager) {
     guideManager = new GuideManager();
-    // 与状态存储集成（如果可能）
     try {
-      const stateStore = engine.getStateStore();
-      if (stateStore) {
-        guideManager.setStateStore(stateStore);
-      }
+      guideManager.setStateStore(engine.getStateStore());
     } catch (e) {
       console.log('引导管理器无法与状态存储集成');
     }
@@ -1372,8 +1494,7 @@ app.get('/api/cot/events', (req, res) => {
  */
 function printStartupInfo(): void {
   const provider = providerConfig.defaultProvider;
-  const modelName = getCurrentModelName();
-  const uiOnly = process.env.UI_ONLY === 'true';
+  const modelName = uiOnly ? 'ui-preview-mode' : getCurrentModelName();
 
   if (uiOnly) {
     console.log(`
@@ -1381,9 +1502,10 @@ function printStartupInfo(): void {
 ║     AI 说书人委员会 · UI 预览模式        ║
 ╚══════════════════════════════════════════╝
 
-🌐 访问地址: http://localhost:${PORT}
+🌐 访问地址: http://${BIND_HOST === '0.0.0.0' ? '127.0.0.1' : BIND_HOST}:${PORT}
 📁 UI 目录: ${path.join(__dirname, '../ui')}
-🔌 API 端点: http://localhost:${PORT}/api
+🔌 API 端点: http://127.0.0.1:${PORT}/api
+🔒 绑定: ${BIND_HOST}:${PORT}
 
 ⚠️  UI 预览模式：AI 功能不可用，仅可查看界面
 `);
@@ -1393,9 +1515,10 @@ function printStartupInfo(): void {
 ║     AI 说书人委员会 · Web 服务已启动     ║
 ╚══════════════════════════════════════════╝
 
-🌐 访问地址: http://localhost:${PORT}
+🌐 访问地址: http://${BIND_HOST === '0.0.0.0' ? '127.0.0.1' : BIND_HOST}:${PORT}
 📁 UI 目录: ${path.join(__dirname, '../ui')}
-🔌 API 端点: http://localhost:${PORT}/api
+🔌 API 端点: http://127.0.0.1:${PORT}/api
+🔒 绑定: ${BIND_HOST}:${PORT}
 `);
 
     // 配置信息输出
@@ -1408,9 +1531,11 @@ function printStartupInfo(): void {
 
     console.log(`   Provider 类型: ${provider}`);
     console.log(`   模型名称: ${modelName}`);
-    console.log(`   游戏语言: ${gameConfig.language}`);
     console.log(`   日志级别: ${process.env.LOG_LEVEL || 'info'}`);
     console.log(`   调试模式: ${process.env.DEBUG === 'true' ? '启用' : '禁用'}`);
+    if (!isLoopbackBind) {
+      console.log('   警告: 服务监听非回环地址，写入 API 需要 X-Api-Token');
+    }
 
     if (Object.keys(providerConfig.agentOverrides || {}).length > 0) {
       console.log('\n🎭 代理独立配置:');
@@ -1450,18 +1575,18 @@ async function main(): Promise<void> {
   // 初始化 Provider 配置（支持自动检测）
   await initProviderConfig();
 
-  // 初始化 ProviderFactory 和 GameEngine
-  providerFactory = new ProviderFactory(providerConfig);
-  engine = new GameEngine({
-    config: gameConfig,
-    providerFactory,
-    dataPath,
-    memoryDbPath,
-    sessionId,
-  });
+  if (!uiOnly) {
+    providerFactory = new ProviderFactory(providerConfig);
+    engine = new GameEngine({
+      config: gameConfig,
+      providerFactory,
+      dataPath,
+      memoryDbPath,
+      sessionId,
+    });
+  }
 
-  // 启动服务器
-  app.listen(PORT, () => {
+  app.listen(PORT, BIND_HOST, () => {
     printStartupInfo();
   });
 }

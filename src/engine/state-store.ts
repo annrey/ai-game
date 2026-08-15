@@ -3,13 +3,14 @@
  * 管理场景状态的读写和持久化
  */
 
-import { writeFile, readFile, mkdir, readdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, readdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type { GameTime, EnvironmentState, NPCState, Action, Resolution, PlotPoint, PlayerState, Quest, SceneState } from '../types/scene.js';
 import type { SaveData, GameMode } from '../types/game.js';
 import { v4 as uuidv4 } from 'uuid';
 import { TIME, TIME_PERIODS, HISTORY, LIMITS, GAME } from '../constants.js';
+import { resolveSaveFilePath } from '../utils/safe-path.js';
 
 // ============ 类型安全的路径类型定义 ============
 
@@ -116,6 +117,7 @@ export function createDefaultSceneState(): SceneState {
       ],
       quests: [],
     },
+    history: [],
   };
 }
 
@@ -203,7 +205,7 @@ export class StateStore {
   }
 
   /** 保存存档 */
-  async save(name: string, mode: GameMode): Promise<string> {
+  async save(name: string, mode: GameMode, metadata: Record<string, unknown> = {}): Promise<string> {
     const id = uuidv4();
     const saveData: SaveData = {
       id,
@@ -212,8 +214,8 @@ export class StateStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       sceneState: this.state,
-      history: [],
-      metadata: {},
+      history: this.state.playerActions,
+      metadata,
     };
 
     const dir = join(this.savePath, 'saves');
@@ -221,14 +223,14 @@ export class StateStore {
       await mkdir(dir, { recursive: true });
     }
 
-    const filePath = join(dir, `${id}.json`);
+    const filePath = resolveSaveFilePath(this.savePath, id);
     await writeFile(filePath, JSON.stringify(saveData, null, 2), 'utf-8');
     return id;
   }
 
   /** 加载存档 */
   async load(id: string): Promise<SaveData> {
-    const filePath = join(this.savePath, 'saves', `${id}.json`);
+    const filePath = resolveSaveFilePath(this.savePath, id);
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as SaveData;
     this.state = data.sceneState as SceneState;
@@ -265,9 +267,8 @@ export class StateStore {
 
   /** 删除存档 */
   async deleteSave(id: string): Promise<void> {
-    const filePath = join(this.savePath, 'saves', `${id}.json`);
+    const filePath = resolveSaveFilePath(this.savePath, id);
     if (existsSync(filePath)) {
-      const { unlink } = await import('fs/promises');
       await unlink(filePath);
     }
   }

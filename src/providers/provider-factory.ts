@@ -267,12 +267,13 @@ export class ProviderFactory {
   }
 
   private initProviders(): void {
-    // OpenAI
-    this.providers.set('openai', new OpenAIProvider({
-      apiKey: this.config.openai?.apiKey,
-      baseURL: this.config.openai?.baseURL,
-      defaultModel: this.config.openai?.defaultModel,
-    }));
+    if (this.config.openai?.apiKey) {
+      this.providers.set('openai', new OpenAIProvider({
+        apiKey: this.config.openai.apiKey,
+        baseURL: this.config.openai.baseURL,
+        defaultModel: this.config.openai.defaultModel,
+      }));
+    }
 
     // Ollama
     this.providers.set('ollama', new OllamaProvider({

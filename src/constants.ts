@@ -61,6 +61,10 @@ export const LIMITS = {
   STRING_LONG: 500,
   /** 规则书最大长度 */
   RULEBOOK_MAX_LENGTH: 200000,
+  /** 玩家输入最大长度 */
+  TURN_INPUT_MAX: 8000,
+  /** JSON 请求体上限 */
+  JSON_BODY_LIMIT: '256kb',
   /** 预览生成提示词最大长度 */
   PREVIEW_PROMPT_MAX: 500,
   /** 最大历史回合配置最小值 */
@@ -79,6 +83,8 @@ export const LIMITS = {
 export const SERVER = {
   /** 默认端口 */
   DEFAULT_PORT: 3000,
+  /** 默认绑定地址（本机回环，避免对局域网裸奔） */
+  DEFAULT_BIND_HOST: '127.0.0.1',
   /** 执行命令最大缓冲区（字节） */
   EXEC_MAX_BUFFER: 1024 * 1024 * 8,
 } as const;

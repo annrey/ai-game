@@ -173,7 +173,7 @@ export interface GameConfig {
   memoryMaxContextChars: number;
   /** 自动世界时间推进 */
   autoWorldTick: boolean;
-  /** 空闲超时时间 */
+  /** 空闲超时（秒） */
   idleTimeout: number;
   /** 启用的代理 */
   enabledAgents: string[];
@@ -184,7 +184,7 @@ export interface GameConfig {
     enabled: boolean;
     level: 'debug' | 'info' | 'warn' | 'error';
   };
-  /** 自动保存间隔 */
+  /** 自动保存间隔（回合数，0 表示关闭） */
   autoSaveInterval: number;
 }
 
@@ -235,9 +235,9 @@ export interface SaveData {
   createdAt: string;
   /** 更新时间 */
   updatedAt: string;
-  /** 历史记录 */
+  /** 历史记录（玩家行动摘要） */
   history: import('./scene.js').Action[];
-  /** 元数据 */
+  /** 元数据（回合数、成就、session 等） */
   metadata: Record<string, unknown>;
 }
 

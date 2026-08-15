@@ -16,14 +16,14 @@ const MODE_CONFIG: GameConfig = {
   difficulty: 'normal',
   memoryMaxContextChars: 2000,
   autoWorldTick: false,
-  idleTimeout: 300000,
+  idleTimeout: 300,
   enabledAgents: ['narrator', 'npc-director'],
   maxHistoryTurns: 60,
   logging: {
     enabled: false,
     level: 'info',
   },
-  autoSaveInterval: 300000,
+  autoSaveInterval: 10,
 };
 
 export function createChatRoleplay(

@@ -19,14 +19,14 @@ const MODE_CONFIG: GameConfig = {
   difficulty: 'normal',
   memoryMaxContextChars: 2000,
   autoWorldTick: false,
-  idleTimeout: 300000,
+  idleTimeout: 300,
   enabledAgents: ['narrator', 'rule-arbiter'],
   maxHistoryTurns: 50,
   logging: {
     enabled: true,
     level: 'info',
   },
-  autoSaveInterval: 300000,
+  autoSaveInterval: 10,
 };
 
 /**

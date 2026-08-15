@@ -7,7 +7,9 @@ services:
     volumes:
       - game-data:/app/data
     environment:
-      - NODE_ENV=production
+      - BIND_HOST=0.0.0.0
+      - ALLOW_REMOTE=true
+      - PROVIDER_URL_ALLOWLIST=host.docker.internal
       - DEFAULT_PROVIDER=ollama
       - OLLAMA_HOST=http://host.docker.internal:11434
       - OLLAMA_MODEL=qwen2.5:7b

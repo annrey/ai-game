@@ -16,14 +16,14 @@ const MODE_CONFIG: GameConfig = {
   difficulty: 'normal',
   memoryMaxContextChars: 2000,
   autoWorldTick: true,
-  idleTimeout: 300000,
+  idleTimeout: 300,
   enabledAgents: ['narrator', 'world-keeper', 'rule-arbiter', 'drama-curator'],
   maxHistoryTurns: 30,
   logging: {
     enabled: true,
     level: 'info',
   },
-  autoSaveInterval: 300000,
+  autoSaveInterval: 10,
 };
 
 export function createTextAdventure(

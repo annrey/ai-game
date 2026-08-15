@@ -15,7 +15,9 @@ import { DramaCurator } from '../agents/drama-curator.js';
 import { MemoryManager } from '../memory/memory-manager.js';
 import { ItemValidator } from '../validators/item-validator.js';
 import { QuestValidator } from '../validators/quest-validator.js';
-import type { SceneState, Quest } from '../types/scene.js';
+import type { SceneState, Quest, TurnRecord } from '../types/scene.js';
+import { parseModelJson } from '../utils/parse-json.js';
+import { extractChainOfThought } from '../utils/chain-of-thought.js';
 import type { GameMode, Achievement, AchievementType, GameConfig } from '../types/game.js';
 import type { AgentRole, AgentResponse } from '../types/agent.js';
 import type { GameAgent } from '../types/agent.js';
@@ -98,6 +100,8 @@ export class GameEngine {
   // 物品生成系统
   private itemValidator: ItemValidator;
 
+  private turnTail: Promise<void> = Promise.resolve();
+
   constructor(options: EngineOptions) {
     this.config = options.config;
     this.providerFactory = options.providerFactory;
@@ -138,24 +142,41 @@ export class GameEngine {
     }
   }
 
+  private async withTurnLock<T>(fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.turnTail;
+    this.turnTail = done;
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   /** 检查是否需要执行自动世界演化 */
   private async checkAutoWorldTick(): Promise<void> {
     if (!this.config.autoWorldTick || this.isAutoTicking) {
       return;
     }
 
-    const idleTimeout = (this.config.idleTimeout ?? 30) * 1000; // 转换为毫秒
+    const idleTimeout = (this.config.idleTimeout ?? 30) * 1000;
     const elapsed = Date.now() - this.lastPlayerActionTime;
 
     if (elapsed >= idleTimeout) {
-      this.isAutoTicking = true;
-      try {
-        await this.performAutoWorldTick();
-      } finally {
-        this.isAutoTicking = false;
-        // 重置计时器，避免连续触发
-        this.lastPlayerActionTime = Date.now();
-      }
+      await this.withTurnLock(async () => {
+        if (this.isAutoTicking) return;
+        this.isAutoTicking = true;
+        try {
+          await this.performAutoWorldTick();
+        } finally {
+          this.isAutoTicking = false;
+          this.lastPlayerActionTime = Date.now();
+        }
+      });
     }
   }
 
@@ -240,7 +261,7 @@ export class GameEngine {
   private setupEventHandlers(): void {
     // 全局事件日志
     this.eventBus.on('*', (event) => {
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         console.log(`[Event] ${event.type} from ${event.source}`);
       }
     });
@@ -252,28 +273,28 @@ export class GameEngine {
 
     // 物品事件处理
     this.eventBus.on(GameEvents.ITEM_CREATED, (event) => {
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         const payload = event.payload as any;
         console.log(`[Item] 创建：${payload.item?.name}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_REWARD, (event) => {
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         const payload = event.payload as any;
         console.log(`[Item] 任务奖励：${payload.item?.name}, 任务 ID: ${payload.questId}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_DISCOVERED, (event) => {
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         const payload = event.payload as any;
         console.log(`[Item] 探索发现：${payload.item?.name}, 地点：${payload.location}`);
       }
     });
 
     this.eventBus.on(GameEvents.ITEM_GIFT, (event) => {
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         const payload = event.payload as any;
         console.log(`[Item] NPC 赠与：${payload.item?.name}, NPC: ${payload.npcName}`);
       }
@@ -283,7 +304,7 @@ export class GameEngine {
   private setupQuestEventHandlers(): void {
     this.eventBus.on('quest:generated', (event) => {
       const { quest, source } = event.payload as { quest: Quest; source: string };
-      if (this.config.logging) {
+      if (this.config.logging?.enabled) {
         console.log(`[Quest] 新任务生成：${quest.title} (来源：${source})`);
       }
     });
@@ -332,7 +353,13 @@ export class GameEngine {
       const provider = this.providerFactory.getForAgent('rule-arbiter');
       const response = await provider.provider.chat([{ role: 'system', content: prompt }], { model: provider.model, responseFormat: 'json', temperature: TEMPERATURE.STATE_PARSE });
       responseContent = response.content;
-      const parsed = JSON.parse(responseContent);
+      const parsed = parseModelJson<{
+        locationChange?: { name?: string; description?: string } | null;
+        timeAdvanceMinutes?: number | null;
+        environmentChange?: { weather?: string; lighting?: string } | null;
+        inventoryChange?: unknown;
+        questUpdate?: unknown;
+      }>(responseContent);
 
       if (parsed.locationChange && parsed.locationChange.name) {
         this.sceneManager.changeLocation(parsed.locationChange.name, parsed.locationChange.description || '');
@@ -347,17 +374,29 @@ export class GameEngine {
         const changes = Array.isArray(parsed.inventoryChange) ? parsed.inventoryChange : [parsed.inventoryChange];
         changes.forEach((change: any) => {
           if (change && change.item && change.action && change.quantity) {
-            this.sceneManager.updateInventoryItem({ name: change.item, action: change.action, quantity: change.quantity, description: change.description });
+            this.sceneManager.updateInventoryItem({
+              name: change.item,
+              action: change.action,
+              quantity: change.quantity,
+              description: change.description,
+              type: change.type,
+            });
           }
         });
       }
       if (parsed.questUpdate) {
         const updates = Array.isArray(parsed.questUpdate) ? parsed.questUpdate : [parsed.questUpdate];
-        updates.forEach((update: any) => {
+        for (const update of updates as any[]) {
           if (update && update.questId && update.title && update.status) {
             this.sceneManager.updateQuest({ questId: update.questId, title: update.title, status: update.status, description: update.description });
+            if (update.status === 'completed') {
+              await this.generateItemFromReward({
+                questId: update.questId,
+                itemType: 'consumable',
+              });
+            }
           }
-        });
+        }
       }
 
       return { success: true };
@@ -446,36 +485,68 @@ export class GameEngine {
     }
   }
 
+  private recordTurn(input: string, narrative: string, agentResponses: AgentResponse[]): void {
+    const narratorCot = agentResponses.find((r) => r.from === 'narrator')?.chainOfThought
+      ?? extractChainOfThought(narrative, 'narrator', Date.now() - 1, Date.now());
+    const record: TurnRecord = {
+      turn: this.turnCount,
+      input,
+      narrative,
+      timestamp: Date.now(),
+      chainOfThought: narratorCot.steps.length > 0
+        ? narratorCot
+        : (agentResponses.find((r) => r.chainOfThought && (r.chainOfThought.steps?.length ?? 0) > 0)?.chainOfThought ?? narratorCot),
+      agentThoughts: agentResponses
+        .map((r) => r.chainOfThought)
+        .filter((c): c is NonNullable<typeof c> => !!c && c.steps.length > 0),
+    };
+    const prev = this.stateStore.getState().history ?? [];
+    const max = this.config.maxHistoryTurns ?? 30;
+    this.stateStore.update({
+      currentTurn: record,
+      history: [...prev, record].slice(-max),
+    });
+  }
+
   /** 处理一回合玩家输入 */
   async processTurn(playerInput: string): Promise<TurnResult> {
-    const { actualInput, context } = this.prepareTurnContext(playerInput);
-
-    // 协调所有代理
-    const result = await this.narrator.orchestrate(actualInput, context);
-
-    // 完成回合处理
-    await this.finalizeTurn(actualInput, result.narrative, context);
-
-    return {
-      narrative: result.narrative,
-      agentDetails: result.agentResponses,
-      stateSnapshot: this.stateStore.getContextSummary(),
-    };
+    return this.withTurnLock(async () => {
+      const { actualInput, context } = this.prepareTurnContext(playerInput);
+      const result = await this.narrator.orchestrate(actualInput, context);
+      await this.finalizeTurn(actualInput, result.narrative, context);
+      this.recordTurn(actualInput, result.narrative, result.agentResponses);
+      return {
+        narrative: result.narrative,
+        agentDetails: result.agentResponses,
+        stateSnapshot: this.stateStore.getContextSummary(),
+      };
+    });
   }
 
   /** 流式处理（包含代理协调） */
   async *processStreamTurn(playerInput: string): AsyncIterable<string> {
-    const { actualInput, context } = this.prepareTurnContext(playerInput);
-
-    let full = '';
-    for await (const payload of this.narrator.orchestrateStream(actualInput, context)) {
-      if (payload.type === 'done') {
-        full = payload.full;
-
-        // 完成回合处理（使用 catch 处理异步错误，避免阻塞流）
-        this.finalizeTurn(actualInput, full, context).catch(err => console.error('[FinalizeTurn Error]', err));
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.turnTail;
+    this.turnTail = done;
+    await previous;
+    try {
+      const { actualInput, context } = this.prepareTurnContext(playerInput);
+      let full = '';
+      let agentResponses: AgentResponse[] = [];
+      for await (const payload of this.narrator.orchestrateStream(actualInput, context)) {
+        if (payload.type === 'done') {
+          full = payload.full;
+          agentResponses = payload.agentResponses ?? [];
+          await this.finalizeTurn(actualInput, full, context);
+          this.recordTurn(actualInput, full, agentResponses);
+        }
+        yield JSON.stringify(payload) + '\n';
       }
-      yield JSON.stringify(payload) + '\n';
+    } finally {
+      release();
     }
   }
 
@@ -498,9 +569,21 @@ export class GameEngine {
     return this.eventBus;
   }
 
+  getStateStore(): StateStore {
+    return this.stateStore;
+  }
+
   /** 保存游戏 */
   async save(name: string): Promise<string> {
-    return this.stateStore.save(name, this.config.mode);
+    return this.stateStore.save(name, this.config.mode, {
+      turnCount: this.turnCount,
+      sessionId: this.memoryManager.getSessionId(),
+      unlockedAchievements: [...this.unlockedAchievements],
+      achievementProgress: Object.fromEntries(this.achievementProgress),
+      uniqueNPCsMet: [...this.uniqueNPCsMet],
+      uniqueItemsCollected: [...this.uniqueItemsCollected],
+      uniqueLocationsVisited: [...this.uniqueLocationsVisited],
+    });
   }
 
   async listSaves(limit?: number): Promise<Array<{ id: string; name: string; mode: GameMode; createdAt: string; updatedAt: string }>> {
@@ -509,7 +592,22 @@ export class GameEngine {
 
   /** 加载游戏 */
   async load(saveId: string): Promise<void> {
-    await this.stateStore.load(saveId);
+    const data = await this.stateStore.load(saveId);
+    const meta = data.metadata ?? {};
+    this.turnCount = typeof meta.turnCount === 'number' ? meta.turnCount : Number(meta.turnCount) || 0;
+    this.memoryManager.setTurn(this.turnCount);
+    if (typeof meta.sessionId === 'string' && meta.sessionId) {
+      this.memoryManager.setSessionId(meta.sessionId);
+    }
+    this.unlockedAchievements = new Set(Array.isArray(meta.unlockedAchievements) ? meta.unlockedAchievements as string[] : []);
+    this.achievementProgress = new Map(
+      meta.achievementProgress && typeof meta.achievementProgress === 'object'
+        ? Object.entries(meta.achievementProgress as Record<string, number>)
+        : [],
+    );
+    this.uniqueNPCsMet = new Set(Array.isArray(meta.uniqueNPCsMet) ? meta.uniqueNPCsMet as string[] : []);
+    this.uniqueItemsCollected = new Set(Array.isArray(meta.uniqueItemsCollected) ? meta.uniqueItemsCollected as string[] : []);
+    this.uniqueLocationsVisited = new Set(Array.isArray(meta.uniqueLocationsVisited) ? meta.uniqueLocationsVisited as string[] : []);
   }
 
   /** 删除存档 */
@@ -526,6 +624,11 @@ export class GameEngine {
     }
     this.eventBus.clearLog();
     this.turnCount = 0;
+    this.unlockedAchievements.clear();
+    this.achievementProgress.clear();
+    this.uniqueNPCsMet.clear();
+    this.uniqueItemsCollected.clear();
+    this.uniqueLocationsVisited.clear();
   }
 
   /** 获取回合数 */
@@ -1169,6 +1272,7 @@ export class GameEngine {
         action: 'add',
         quantity: 1,
         description: item.description,
+        type: item.type,
       });
       this.updateItemProgress(item.name);
     }

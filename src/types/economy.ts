@@ -4,7 +4,15 @@
  */
 
 /** 商品类型 */
-export type ItemType = 'drink' | 'food' | 'misc' | 'service';
+export type ItemType =
+  | 'drink'
+  | 'food'
+  | 'misc'
+  | 'service'
+  | 'weapon'
+  | 'armor'
+  | 'consumable'
+  | 'quest';
 
 /** 商品 */
 export interface Item {

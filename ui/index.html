@@ -2818,11 +2818,18 @@
   <script>
     // API 客户端
     const API_BASE = '';
+    window.__API_TOKEN__ = window.__API_TOKEN__ || '';
 
     async function api(endpoint, options = {}) {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(window.__API_TOKEN__ ? { 'X-Api-Token': window.__API_TOKEN__ } : {}),
+        ...(options.headers || {}),
+      };
       const res = await fetch(`${API_BASE}/api${endpoint}`, {
-        headers: { 'Content-Type': 'application/json' },
         ...options,
+        credentials: 'same-origin',
+        headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
       });
       const isJson = res.headers.get('content-type')?.includes('application/json');

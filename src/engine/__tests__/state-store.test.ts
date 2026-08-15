@@ -160,6 +160,19 @@ describe('StateStore', () => {
       const id = await store.save('自动创建', 'text-adventure');
       expect(existsSync(join(testSavePath, 'saves', `${id}.json`))).toBe(true);
     });
+
+    it('拒绝路径穿越的存档 id', async () => {
+      await expect(store.load('../../../package')).rejects.toThrow(/Invalid save id/);
+      await expect(store.deleteSave('../../../package')).rejects.toThrow(/Invalid save id/);
+    });
+
+    it('应把回合元数据写入存档', async () => {
+      const id = await store.save('带元数据', 'text-adventure', { turnCount: 7, sessionId: 's-1' });
+      const loaded = await new StateStore(testSavePath).load(id);
+      expect(loaded.metadata.turnCount).toBe(7);
+      expect(loaded.metadata.sessionId).toBe('s-1');
+      expect(loaded.history.length).toBeGreaterThanOrEqual(0);
+    });
   });
 
   describe('reset', () => {

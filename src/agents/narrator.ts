@@ -7,6 +7,7 @@ import { BaseAgent } from './base-agent.js';
 import type { AIProvider } from '../types/provider.js';
 import type { AgentConfig, AgentRequest, AgentResponse, GameAgent } from '../types/agent.js';
 import { LIMITS, TEMPERATURE } from '../constants.js';
+import { parseModelJson } from '../utils/parse-json.js';
 
 interface AgentTiming {
   role: string;
@@ -110,7 +111,7 @@ export class Narrator extends BaseAgent {
         );
         analysisDuration = Date.now() - analysisStartTime;
 
-        const parsed = JSON.parse(analysis.content);
+        const parsed = parseModelJson<{ consult?: string[]; reason?: string }>(analysis.content);
         const toConsult: string[] = parsed.consult ?? [];
 
         console.log(`[Narrator] 分析完成，需要咨询 ${toConsult.length} 个代理: ${toConsult.join(', ')}`);
@@ -297,7 +298,7 @@ export class Narrator extends BaseAgent {
         );
         analysisDuration = Date.now() - analysisStartTime;
 
-        const parsed = JSON.parse(analysis.content);
+        const parsed = parseModelJson<{ consult?: string[]; reason?: string }>(analysis.content);
         const toConsult: string[] = parsed.consult ?? [];
 
         console.log(`[Narrator] Stream 分析完成，需要咨询 ${toConsult.length} 个代理: ${toConsult.join(', ')}`);

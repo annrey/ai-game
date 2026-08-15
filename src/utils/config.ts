@@ -1,37 +1,29 @@
 /**
  * 配置加载工具
- * 统一处理 .env.test.local 和 .env 的加载逻辑
+ * 生产只读 .env；测试才加载 .env.test.local 并覆盖同名项
  */
 
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 
-/**
- * 加载测试环境配置
- * 配置优先级：环境变量 > .env.test.local > .env
- *
- * 加载顺序（dotenv 不会覆盖已存在的环境变量）：
- * 1. 首先加载 .env（基础配置）
- * 2. 然后加载 .env.test.local（测试配置，覆盖 .env 中的同名变量）
- * 3. 已存在的环境变量优先级最高，不会被覆盖
- */
-export function loadTestConfig(): void {
-  const cwd = process.cwd();
-  const testEnvPath = path.join(cwd, '.env.test.local');
-  const defaultEnvPath = path.join(cwd, '.env');
-
-  // 先加载 .env（如果存在）
-  // 使用 override: false 确保不会覆盖已存在的环境变量
+/** 加载 .env，不覆盖进程里已有的环境变量 */
+export function loadEnv(): void {
+  const defaultEnvPath = path.join(process.cwd(), '.env');
   if (fs.existsSync(defaultEnvPath)) {
     dotenv.config({ path: defaultEnvPath, override: false });
   }
+}
 
-  // 然后加载 .env.test.local（如果存在）
-  // 使用 override: false 确保不会覆盖已存在的环境变量
+/**
+ * 测试配置：先 .env，再 .env.test.local（覆盖 .env 中的同名变量）。
+ * 进程里预先存在的环境变量仍优先于 .env，但会被 .env.test.local 覆盖。
+ */
+export function loadTestConfig(): void {
+  loadEnv();
+  const testEnvPath = path.join(process.cwd(), '.env.test.local');
   if (fs.existsSync(testEnvPath)) {
-    console.log('📄 检测到测试环境配置，加载 .env.test.local');
-    dotenv.config({ path: testEnvPath, override: false });
+    dotenv.config({ path: testEnvPath, override: true });
   }
 }
 

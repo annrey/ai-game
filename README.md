@@ -62,36 +62,39 @@
 
 ### 前置要求
 
-- Node.js >= 18.0.0
-- npm 或 yarn
+- Rust 1.82+（`cargo` / `rustc`）
 - AI 服务（本地或云端）
+- 可选：Node.js >= 18（仅当要跑旧 TypeScript 参考实现）
 
 ### 安装
 
 ```bash
 # 克隆项目
 git clone https://github.com/annrey/ai-game.git
-cd ai-game/game
-
-# 安装依赖
-npm install
+cd ai-game
 
 # 配置环境变量
 cp .env.example .env
 # 编辑 .env 文件，配置你的 AI 服务
 ```
 
+运行时是 Rust crate `crates/ai-storyteller`。类型、模式、存档 ID、Provider URL 在编译期检查。`src/` 下的 TypeScript 仅作对照，不再作为默认入口。
+
 ### 启动游戏
 
 ```bash
 # 开发模式（推荐）
+cargo run -p ai-storyteller
+# 或
 npm run dev
 
-# 启动服务器 + UI 界面
-npm run server
+# 仅启动 UI（不连 AI / 不打开 SQLite）
+cargo run -p ai-storyteller -- --ui-only
 
-# 仅启动 UI 服务器
-npm run server:ui
+# 发布构建
+cargo build -p ai-storyteller --release
+cargo run -p ai-storyteller --release
+```
 
 # 快速测试不同模式
 npm run demo              # 默认沙盒模式
@@ -220,8 +223,8 @@ npm run demo:roleplay
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   API Server (Express)                   │
-│  /api/guide/*  /api/narrative  /api/npcs  /api/action   │
+│                API Server (Axum / Rust)                  │
+│  /api/guide/*  /api/turn  /api/state  /api/saves        │
 └─────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -268,16 +271,12 @@ npm run demo:roleplay
 #### 2. AI 代理层 (Agents)
 每个代理都有专门的职责和提示词模板：
 
-```typescript
-// 示例：使用引导代理
-const guideAgent = new GuideAgent(guideManager, provider);
-const response = await guideAgent.chat("如何配置本地 AI？");
-```
+引导代理在 Rust `guide.rs` 里，走 `/api/guide/chat`。`src/` 下的 TypeScript 只作对照，不再是默认入口。
 
-#### 3. 记忆系统 (MemorySystem)
+#### 3. 记忆系统 (Memory)
 - 短期记忆 - 当前会话上下文
-- 长期记忆 - 持久化存储
-- 语义检索 - 向量相似度搜索
+- 长期记忆 - SQLite 持久化
+- 检索 - FTS5 关键词搜索（不是向量检索）
 
 #### 4. 规则引擎 (RuleEngine)
 - 动作验证
@@ -296,9 +295,9 @@ const response = await guideAgent.chat("如何配置本地 AI？");
 3. 点击 "Start Server"
 4. 配置：
    ```
-   AI_PROVIDER=local
-   LOCAL_MODEL_ENDPOINT=http://localhost:1234/v1
-   LOCAL_MODEL_NAME=llama-3.2-3b-instruct
+   DEFAULT_PROVIDER=local
+   LOCAL_AI_ENDPOINT=http://localhost:1234/v1
+   LOCAL_AI_MODEL=llama-3.2-3b-instruct
    ```
 
 #### Ollama（性能优秀）
@@ -306,25 +305,30 @@ const response = await guideAgent.chat("如何配置本地 AI？");
 2. 下载模型：`ollama pull llama3.2`
 3. 配置：
    ```
-   AI_PROVIDER=ollama
+   DEFAULT_PROVIDER=ollama
    OLLAMA_MODEL=llama3.2
    ```
 
 ### 云端 AI
 
-#### OpenAI
+#### OpenAI 或兼容接口
 ```
-AI_PROVIDER=openai
+DEFAULT_PROVIDER=openai
 OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o
 ```
 
-#### Anthropic (Claude)
+Claude / DeepSeek / Moonshot 等请走 OpenAI 兼容 `baseURL`，仓库里没有独立的 Anthropic provider。
+
+HTTP 默认只绑定 `127.0.0.1`。写入类 API 需要 `X-Api-Token`（页面加载时由服务器注入）。若要监听全部网卡：
+
 ```
-AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-xxx
-ANTHROPIC_MODEL=claude-3-sonnet-20240229
+ALLOW_REMOTE=true
+BIND_HOST=0.0.0.0
 ```
+
+本地 Provider 只接受 loopback URL。Docker 访问宿主机 Ollama 时设置 `PROVIDER_URL_ALLOWLIST=host.docker.internal`。
 
 ---
 
@@ -333,93 +337,46 @@ ANTHROPIC_MODEL=claude-3-sonnet-20240229
 ### 项目结构
 
 ```
-game/
-├── src/
-│   ├── engine/           # 游戏引擎核心
-│   │   ├── game-engine.ts
-│   │   ├── guide-manager.ts      # ✨ 引导管理器
-│   │   ├── event-bus.ts
-│   │   ├── scene-manager.ts
-│   │   ├── state-store.ts
-│   │   └── memory-system.ts
-│   │
-│   ├── agents/           # AI 代理
-│   │   ├── base-agent.ts
-│   │   ├── narrator.ts
-│   │   ├── world-keeper.ts
-│   │   ├── npc-director.ts
-│   │   ├── rule-arbiter.ts
-│   │   ├── drama-curator.ts
-│   │   └── guide-agent.ts        # ✨ 引导代理
-│   │
-│   ├── providers/        # AI Provider
-│   │   ├── base-provider.ts
-│   │   ├── openai-provider.ts
-│   │   ├── ollama-provider.ts
-│   │   └── local-provider.ts
-│   │
-│   ├── types/            # 类型定义
-│   │   ├── game.ts
-│   │   ├── agent.ts
-│   │   ├── guide.ts              # ✨ 引导类型
-│   │   └── scene.ts
-│   │
-│   ├── modes/            # 游戏模式
-│   │   ├── text-adventure.ts
-│   │   ├── ai-battle.ts
-│   │   ├── npc-sandbox.ts
-│   │   └── chat-roleplay.ts
-│   │
-│   ├── ui/               # UI 界面
-│   │   └── index.html
-│   │
-│   ├── server.ts         # API 服务器
-│   └── index.ts          # 主入口
-│
-├── .trae/specs/          # 规格文档
-│   └── guide-system/     # ✨ 引导系统规格
-│       ├── spec.md
-│       ├── tasks.md
-│       └── checklist.md
-│
-├── package.json
+.
+├── crates/ai-storyteller/   # Rust 运行时（默认入口）
+│   └── src/
+│       ├── main.rs          # HTTP 服务
+│       ├── engine.rs        # 回合 / 存档 / 思维链
+│       ├── types/           # 枚举化的状态与配置
+│       ├── providers.rs     # OpenAI 兼容 HTTP
+│       ├── memory.rs        # rusqlite
+│       └── security/        # SSRF / 存档路径 / JSON 围栏
+├── src/                     # 旧 TypeScript 参考实现
+├── ui/index.html
+├── Cargo.toml
 └── README.md
 ```
 
+默认入口是 `cargo run -p ai-storyteller`。四种模式会套用不同的场景模板、代理组合和叙述约束；沙盒酒馆会按小时更新 NPC 在场与日程。闲置超时后 World Keeper 会自动推进世界。对战模式用 d20 + 攻防结算（进攻/防御/佯攻/调息），先打满 3 次有效命中或把对方 HP 打到 0 即胜。五步引导会探测 Provider、记下角色/世界名并在「世界初始化」时写入场景。`POST /api/config` 可带 `mode` 和 `templateId`，`GET /api/modes` 列出模板。
+
 ### 添加新的游戏模式
 
-1. 在 `src/modes/` 创建新模式文件
-2. 继承 `BaseGameMode` 类
-3. 实现必需的方法
-4. 在 `game-engine.ts` 中注册
+1. 在 `crates/ai-storyteller/src/modes.rs` 增加 `Seed` / 模板
+2. 在 `GameConfig::for_mode` 里设代理组合和开关
+3. 如需独立结算（对战、结局），接到 `engine.rs` 的回合循环
+4. Web 用 `POST /api/config` 传 `mode` 与 `templateId`
+
+`src/` 是冻结的 TypeScript 对照实现，不要再往那里加功能。
 
 ### 创建自定义 AI 代理
 
-```typescript
-import { BaseAgent } from './agents/base-agent.js';
-
-export class CustomAgent extends BaseAgent {
-  async process(request: AgentRequest): Promise<AgentResponse> {
-    // 实现你的逻辑
-    const response = await this.generateResponse(request);
-    return response;
-  }
-}
-```
+在 `crates/ai-storyteller/src/types/agent.rs` 增加角色，在 `agents.rs` 写内置提示词，并在 `skills/<name>/SKILL.md` 放可热加载文本。
 
 ### 测试
 
 ```bash
-# 运行所有测试
+# Rust 运行时（默认）
+cargo test -p ai-storyteller
+
+# TypeScript 对照层（可选）
 npm test
 
-# 监听模式
-npm run test:watch
-
-# 测试覆盖率
-npm run test:coverage
-
-# 本地 AI 测试
+# 本地 AI 冒烟
 npm run test:local
 ```
 

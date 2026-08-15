@@ -4,9 +4,9 @@
  */
 
 import type { AIProvider, ChatMessage, ChatOptions } from '../types/provider.js';
-import type { AgentConfig, AgentRequest, AgentResponse, AgentRole, GameAgent, ChainOfThought, CoTStep } from '../types/agent.js';
+import type { AgentConfig, AgentRequest, AgentResponse, AgentRole, GameAgent, ChainOfThought } from '../types/agent.js';
 import { HISTORY, TEMPERATURE } from '../constants.js';
-import { v4 as uuidv4 } from 'uuid';
+import { extractChainOfThought as parseChainOfThought } from '../utils/chain-of-thought.js';
 
 export abstract class BaseAgent implements GameAgent {
   readonly role: AgentRole;
@@ -143,119 +143,7 @@ export abstract class BaseAgent implements GameAgent {
    * @param endTime 结束时间
    */
   protected extractChainOfThought(content: string, startTime: number, endTime: number): ChainOfThought {
-    const totalDuration = endTime - startTime;
-    
-    // 尝试从内容中解析思维链（使用标记）
-    const steps: CoTStep[] = [];
-    
-    // 定义思维链标记
-    const markers = {
-      observation: ['【观察】', '[Observation]', '## Observation', '观察：'],
-      analysis: ['【分析】', '[Analysis]', '## Analysis', '分析：'],
-      reasoning: ['【推理】', '[Reasoning]', '## Reasoning', '推理：'],
-      decision: ['【决策】', '[Decision]', '## Decision', '决策：'],
-      action: ['【行动】', '[Action]', '## Action', '行动：'],
-    };
-
-    // 提取每个步骤
-    const stepTypes: Array<CoTStep['step']> = ['observation', 'analysis', 'reasoning', 'decision', 'action'];
-    const stepTitles = {
-      observation: '👁️ 观察',
-      analysis: '🧠 分析',
-      reasoning: '💭 推理',
-      decision: '✅ 决策',
-      action: '🎯 行动',
-    };
-
-    stepTypes.forEach((stepType, index) => {
-      const stepMarkers = markers[stepType];
-      let stepContent = '';
-      
-      // 查找标记
-      for (const marker of stepMarkers) {
-        const markerIndex = content.indexOf(marker);
-        if (markerIndex !== -1) {
-          // 提取从标记开始到下一个标记或结尾的内容
-          const startIdx = markerIndex + marker.length;
-          let endIdx = content.length;
-          
-          // 查找下一个标记
-          for (const nextMarker of Object.values(markers).flat()) {
-            const nextIdx = content.indexOf(nextMarker, startIdx);
-            if (nextIdx !== -1 && nextIdx < endIdx) {
-              endIdx = nextIdx;
-            }
-          }
-          
-          stepContent = content.substring(startIdx, endIdx).trim();
-          break;
-        }
-      }
-      
-      if (stepContent) {
-        steps.push({
-          step: stepType,
-          title: stepTitles[stepType],
-          content: stepContent,
-          duration: Math.floor(totalDuration / stepTypes.length),
-        });
-      }
-    });
-
-    // 如果没有找到标记化的思维链，生成一个简化的版本
-    if (steps.length === 0) {
-      steps.push({
-        step: 'observation',
-        title: '👁️ 观察',
-        content: `收到请求：${content.substring(0, 100)}...`,
-        duration: Math.floor(totalDuration * 0.2),
-      });
-      steps.push({
-        step: 'analysis',
-        title: '🧠 分析',
-        content: '分析请求内容和上下文...',
-        duration: Math.floor(totalDuration * 0.2),
-      });
-      steps.push({
-        step: 'reasoning',
-        title: '💭 推理',
-        content: '基于知识和规则进行推理...',
-        duration: Math.floor(totalDuration * 0.2),
-      });
-      steps.push({
-        step: 'decision',
-        title: '✅ 决策',
-        content: '决定最佳响应方式...',
-        duration: Math.floor(totalDuration * 0.2),
-      });
-      steps.push({
-        step: 'action',
-        title: '🎯 行动',
-        content: '生成并发送响应',
-        duration: Math.floor(totalDuration * 0.2),
-      });
-    }
-
-    // 生成摘要
-    const summary = this.generateChainOfThoughtSummary(steps);
-
-    return {
-      id: uuidv4(),
-      agentRole: this.role,
-      timestamp: endTime,
-      steps,
-      summary,
-    };
-  }
-
-  /**
-   * 生成思维链摘要
-   */
-  private generateChainOfThoughtSummary(steps: CoTStep[]): string {
-    if (steps.length === 0) return '无思维链';
-    
-    const keySteps = steps.slice(0, 2);
-    return keySteps.map(s => `${s.title}: ${s.content.substring(0, 50)}...`).join(' | ');
+    return parseChainOfThought(content, this.role, startTime, endTime);
   }
 
   /**

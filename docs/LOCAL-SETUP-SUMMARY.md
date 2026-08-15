@@ -147,8 +147,8 @@ npm run demo
 
 1. **立即使用**：用 Ollama 方案（已配置好）
    ```bash
-   ./switch-backend.sh ollama
-   npm run demo
+   cargo run -p ai-storyteller
+   # 或 npm run dev
    ```
 
 2. **体验 Jan**：下载 Jan 并导入模型

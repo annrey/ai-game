@@ -105,29 +105,29 @@ describe('ProviderFactory', () => {
       process.env = { ...originalEnv };
     });
 
-    it('应从环境变量创建工厂', () => {
+    it('应从环境变量创建工厂', async () => {
       process.env.DEFAULT_PROVIDER = 'ollama';
       process.env.OLLAMA_HOST = 'http://localhost:11434';
       process.env.OLLAMA_MODEL = 'qwen2.5:7b';
 
-      const factory = ProviderFactory.fromEnv();
+      const factory = await ProviderFactory.fromEnv();
       expect(factory.getDefault().type).toBe('ollama');
     });
 
-    it('无 OPENAI_API_KEY 时不应创建 OpenAI provider', () => {
+    it('无 OPENAI_API_KEY 时不应创建 OpenAI provider', async () => {
       delete process.env.OPENAI_API_KEY;
       process.env.DEFAULT_PROVIDER = 'ollama';
 
-      const factory = ProviderFactory.fromEnv();
+      const factory = await ProviderFactory.fromEnv();
       expect(() => factory.getByType('openai')).toThrow();
     });
 
-    it('应解析 agent 级别的环境变量覆盖', () => {
+    it('应解析 agent 级别的环境变量覆盖', async () => {
       process.env.DEFAULT_PROVIDER = 'ollama';
       process.env.NARRATOR_PROVIDER = 'local';
       process.env.NARRATOR_MODEL = 'narrator-special';
 
-      const factory = ProviderFactory.fromEnv();
+      const factory = await ProviderFactory.fromEnv();
       const result = factory.getForAgent('narrator');
       expect(result.provider.type).toBe('local');
       expect(result.model).toBe('narrator-special');

@@ -9,7 +9,7 @@ const DEFAULT_ITEM_RULES: ItemValidationRules = {
   minPrice: 1,
   maxPrice: 10000,
   maxStack: 999,
-  allowedTypes: ['drink', 'food', 'misc', 'service'],
+  allowedTypes: ['drink', 'food', 'misc', 'service', 'weapon', 'armor', 'consumable', 'quest'],
   maxEffects: 5,
 };
 
@@ -236,6 +236,62 @@ export class ItemValidator implements ItemGenerator {
           ],
         }
       );
+    } else if (itemType === 'weapon') {
+      templates.push({
+        baseName: '短剑',
+        basePrice: 40,
+        baseStock: 8,
+        effects: [],
+        icon: '⚔️',
+        namePrefixes: ['锋利', '旧日', '铁铸', '旅行者', '守夜'],
+        descriptions: [
+          '一把趁手的近战武器。',
+          '冒险途中常见的防身短剑。',
+          '虽不华贵，但足够锋利。',
+        ],
+      });
+    } else if (itemType === 'armor') {
+      templates.push({
+        baseName: '皮甲',
+        basePrice: 45,
+        baseStock: 6,
+        effects: [{ type: 'stamina', value: 5 }],
+        icon: '🛡️',
+        namePrefixes: ['结实', '轻便', '修补过的', '旅行', '护身'],
+        descriptions: [
+          '能挡下普通砍击的轻甲。',
+          '适合长途跋涉的防护。',
+          '旧但仍能护住要害。',
+        ],
+      });
+    } else if (itemType === 'consumable') {
+      templates.push({
+        baseName: '药水',
+        basePrice: 18,
+        baseStock: 20,
+        effects: [{ type: 'heal', value: 20 }],
+        icon: '🧪',
+        namePrefixes: ['微型', '清澈', '应急', '旅行', '调和'],
+        descriptions: [
+          '一瓶能恢复伤势的药水。',
+          '冒险者包里常见的消耗品。',
+          '气味刺鼻，但效果明确。',
+        ],
+      });
+    } else if (itemType === 'quest') {
+      templates.push({
+        baseName: '信物',
+        basePrice: 1,
+        baseStock: 1,
+        effects: [],
+        icon: '📜',
+        namePrefixes: ['任务', '关键', '古老', '封印', '遗落'],
+        descriptions: [
+          '与当前任务相关的关键物品。',
+          '看起来不该随便丢掉。',
+          '上面似乎记着某条线索。',
+        ],
+      });
     } else if (itemType === 'misc') {
       templates.push(
         {

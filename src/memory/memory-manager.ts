@@ -32,6 +32,14 @@ export class MemoryManager {
     this.currentTurn = turn;
   }
 
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
+  setSessionId(sessionId: string): void {
+    this.sessionId = sessionId;
+  }
+
   /** 存储一条记忆 */
   remember(content: string, type: MemoryType, importance: number = 0.5, tags: string[] = []): MemoryEntry {
     return this.store.add({
